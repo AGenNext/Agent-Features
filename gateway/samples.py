@@ -15,7 +15,7 @@ import operator as op
 from typing import Any
 
 from .catalog import InMemoryCatalog
-from .invoker import Handler, LocalInvoker
+from .invoker import FeatureInputError, Handler, LocalInvoker
 from .models import Manifest
 
 # (manifest, handler) pairs registered below.
@@ -47,8 +47,12 @@ def _safe_eval(node: ast.AST) -> float:
 
 
 def _calculator(payload: dict[str, Any]) -> dict[str, Any]:
-    tree = ast.parse(payload["expression"], mode="eval")
-    return {"result": _safe_eval(tree)}
+    try:
+        tree = ast.parse(payload["expression"], mode="eval")
+        return {"result": _safe_eval(tree)}
+    except (ValueError, SyntaxError, ZeroDivisionError) as exc:
+        # Schema-valid string, but not a usable expression — tell the caller.
+        raise FeatureInputError(f"invalid expression: {exc}") from exc
 
 
 _register(

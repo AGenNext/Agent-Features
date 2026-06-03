@@ -21,7 +21,7 @@ from fastapi import FastAPI, HTTPException, Request
 
 from . import __version__, mcp
 from .catalog import Catalog
-from .invoker import FeatureUnavailable, Invoker
+from .invoker import FeatureInputError, FeatureUnavailable, Invoker
 from .models import Feature, InvokeRequest, InvokeResponse
 from .samples import build_dev_catalog_and_invoker
 from .validation import ValidationError, validate
@@ -98,6 +98,9 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
             raise HTTPException(status_code=422, detail=exc.errors) from exc
         try:
             result = await invoker.invoke(name, body.input, body.context)
+        except FeatureInputError as exc:
+            # The feature's own message about bad input is safe to return.
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except FeatureUnavailable as exc:
             # Log the cause; return a generic message so no internal detail leaks.
             logger.warning("feature %s unavailable: %s", name, exc)

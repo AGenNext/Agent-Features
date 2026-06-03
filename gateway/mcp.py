@@ -16,7 +16,7 @@ import logging
 from typing import Any
 
 from .catalog import Catalog
-from .invoker import FeatureUnavailable, Invoker
+from .invoker import FeatureInputError, FeatureUnavailable, Invoker
 from .models import RequestContext
 from .validation import ValidationError, validate
 
@@ -85,6 +85,8 @@ async def _call(msg_id, params, catalog: Catalog, invoker: Invoker) -> dict[str,
         # input — safe and useful to return. We avoid stringifying the
         # exception itself so no internal detail leaks.
         return _tool_error(msg_id, "invalid input: " + "; ".join(exc.errors))
+    except FeatureInputError as exc:
+        return _tool_error(msg_id, str(exc))
     except FeatureUnavailable as exc:
         # Log the cause server-side; return a generic message to the caller.
         logger.warning("feature %s unavailable: %s", name, exc)

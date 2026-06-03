@@ -30,6 +30,17 @@ class FeatureUnavailable(Exception):
     """Raised when the target feature cannot be reached or does not exist."""
 
 
+class FeatureInputError(Exception):
+    """Raised by a feature when input is schema-valid but semantically invalid.
+
+    Distinct from validation (which checks the JSON Schema) and from
+    FeatureUnavailable (a transport/availability problem): this is the feature
+    saying "I understood the shape, but the values don't make sense" — e.g. an
+    un-parseable expression. The gateway surfaces it as a controlled 422 rather
+    than an opaque 500, while genuinely unexpected errors stay opaque.
+    """
+
+
 @runtime_checkable
 class Invoker(Protocol):
     async def invoke(
@@ -99,6 +110,10 @@ class GrpcInvoker:
         try:
             response = await stub.Invoke(request, timeout=context.timeout_ms / 1000)
         except grpc.aio.AioRpcError as exc:
+            # A feature reports bad input via INVALID_ARGUMENT; everything else
+            # is an availability/transport problem.
+            if exc.code() == grpc.StatusCode.INVALID_ARGUMENT:
+                raise FeatureInputError(exc.details() or "invalid input") from exc
             raise FeatureUnavailable(f"gRPC call to '{feature}' failed: {exc.code()}") from exc
         latency_ms = (time.perf_counter() - start) * 1000
 
