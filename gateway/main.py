@@ -13,6 +13,7 @@ Kubernetes catalog + gRPC invoker without touching the routes below.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -23,6 +24,8 @@ from .invoker import FeatureUnavailable, Invoker
 from .models import Feature, InvokeRequest, InvokeResponse
 from .samples import build_dev_catalog_and_invoker
 from .validation import ValidationError, validate
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -> FastAPI:
@@ -77,7 +80,11 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
         try:
             result = await invoker.invoke(name, body.input, body.context)
         except FeatureUnavailable as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            # Log the cause; return a generic message so no internal detail leaks.
+            logger.warning("feature %s unavailable: %s", name, exc)
+            raise HTTPException(
+                status_code=503, detail=f"feature '{name}' is currently unavailable"
+            ) from exc
         return InvokeResponse(
             feature=name,
             version=feature.manifest.version,

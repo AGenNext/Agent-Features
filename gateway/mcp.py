@@ -12,12 +12,15 @@ Only the subset needed to be useful is implemented: ``initialize``,
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from .catalog import Catalog
 from .invoker import FeatureUnavailable, Invoker
 from .models import RequestContext
 from .validation import ValidationError, validate
+
+logger = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_INFO = {"name": "agent-features-gateway", "version": "0.1.0"}
@@ -78,9 +81,14 @@ async def _call(msg_id, params, catalog: Catalog, invoker: Invoker) -> dict[str,
         validate(arguments, feature.manifest.input_schema)
         result = await invoker.invoke(name, arguments, RequestContext())
     except ValidationError as exc:
-        return _tool_error(msg_id, f"invalid input: {exc}")
+        # exc.errors are our own schema-violation messages about the caller's
+        # input — safe and useful to return. We avoid stringifying the
+        # exception itself so no internal detail leaks.
+        return _tool_error(msg_id, "invalid input: " + "; ".join(exc.errors))
     except FeatureUnavailable as exc:
-        return _tool_error(msg_id, f"feature unavailable: {exc}")
+        # Log the cause server-side; return a generic message to the caller.
+        logger.warning("feature %s unavailable: %s", name, exc)
+        return _tool_error(msg_id, f"feature '{name}' is currently unavailable")
 
     # MCP tool results are content blocks; we return the output as JSON text.
     return _ok(msg_id, {
