@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-features-system
+  labels: { app.kubernetes.io/part-of: agent-features }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: features
+  labels: { app.kubernetes.io/part-of: agent-features }

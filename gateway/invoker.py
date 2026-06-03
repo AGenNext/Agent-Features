@@ -57,17 +57,55 @@ class LocalInvoker:
 
 
 class GrpcInvoker:
-    """Production invoker that calls a feature pod's ``FeatureService``.
+    """Calls a feature workload's ``FeatureService`` over gRPC.
 
-    Stubbed until the operator phase (M1). It will resolve the feature's
-    in-cluster endpoint from the catalog, dial gRPC, propagate the trace
-    context from ``RequestContext`` and map ``InvokeResponse`` back.
+    ``endpoint_resolver`` maps a feature name to its ``host:port`` (in a
+    cluster, from the catalog's ``Feature.endpoint``). gRPC and its generated
+    stubs are imported lazily so the dev path (LocalInvoker) needs neither.
     """
 
-    def __init__(self, *, endpoint_resolver: Callable[[str], str] | None = None):
+    def __init__(self, *, endpoint_resolver: Callable[[str], str]) -> None:
         self._resolve = endpoint_resolver
+        self._channels: dict[str, Any] = {}
 
-    async def invoke(self, feature, payload, context):  # pragma: no cover
-        raise NotImplementedError(
-            "GrpcInvoker arrives with the operator (M1); use LocalInvoker for dev."
+    async def invoke(
+        self, feature: str, payload: dict[str, Any], context: RequestContext
+    ) -> InvokeResult:
+        import grpc
+        from google.protobuf import json_format, struct_pb2
+
+        from agentfeatures.v1 import feature_pb2, feature_pb2_grpc
+
+        endpoint = self._resolve(feature)
+        channel = self._channels.get(endpoint)
+        if channel is None:
+            channel = grpc.aio.insecure_channel(endpoint)
+            self._channels[endpoint] = channel
+        stub = feature_pb2_grpc.FeatureServiceStub(channel)
+
+        request = feature_pb2.InvokeRequest(
+            feature=feature,
+            input=struct_pb2.Struct(),
+            context=feature_pb2.RequestContext(
+                trace_id=context.trace_id or "",
+                tenant=context.tenant or "",
+                timeout_ms=context.timeout_ms,
+                metadata=context.metadata,
+            ),
         )
+        request.input.update(payload)
+
+        start = time.perf_counter()
+        try:
+            response = await stub.Invoke(request, timeout=context.timeout_ms / 1000)
+        except grpc.aio.AioRpcError as exc:
+            raise FeatureUnavailable(f"gRPC call to '{feature}' failed: {exc.code()}") from exc
+        latency_ms = (time.perf_counter() - start) * 1000
+
+        output = json_format.MessageToDict(response.output)
+        return InvokeResult(output=output, latency_ms=round(latency_ms, 3))
+
+    async def close(self) -> None:
+        for channel in self._channels.values():
+            await channel.close()
+        self._channels.clear()

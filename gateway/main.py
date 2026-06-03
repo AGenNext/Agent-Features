@@ -14,6 +14,7 @@ Kubernetes catalog + gRPC invoker without touching the routes below.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -30,6 +31,24 @@ logger = logging.getLogger(__name__)
 
 def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -> FastAPI:
     """Build the gateway app, optionally with injected catalog/invoker."""
+
+    if catalog is None and invoker is None and os.getenv("AGENT_FEATURES_MODE") == "cluster":
+        # Cluster mode: discover Features from the Kubernetes API and invoke the
+        # workloads the operator scheduled, over gRPC.
+        from .catalog import KubernetesCatalog
+        from .invoker import GrpcInvoker
+
+        namespace = os.getenv("FEATURES_NAMESPACE", "features")
+        k8s_catalog = KubernetesCatalog(namespace=namespace)
+
+        def _resolve(name: str) -> str:
+            feature = k8s_catalog.get(name)
+            if feature is None or not feature.endpoint:
+                raise FeatureUnavailable(f"no endpoint for feature '{name}'")
+            return feature.endpoint
+
+        catalog = k8s_catalog
+        invoker = GrpcInvoker(endpoint_resolver=_resolve)
 
     if catalog is None or invoker is None:
         dev_catalog, dev_invoker = build_dev_catalog_and_invoker()
