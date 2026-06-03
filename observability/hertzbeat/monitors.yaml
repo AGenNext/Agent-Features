@@ -1,0 +1,43 @@
+# HertzBeat monitors for the Agent Features platform.
+# https://hertzbeat.apache.org — agentless, real-time monitoring + alerting.
+#
+# These describe what HertzBeat probes. Import via the HertzBeat API/UI; the
+# shape below mirrors HertzBeat's monitor model (app + params + interval).
+monitors:
+  # Liveness of the gateway — the agent-facing front door.
+  - name: gateway-health
+    app: api_http
+    host: agent-features-gateway.agent-features-system.svc.cluster.local
+    intervals: 30        # seconds
+    params:
+      port: 80
+      uri: /health
+      method: GET
+      ssl: false
+    tags:
+      component: gateway
+
+  # The MCP endpoint must answer tools/list (agents depend on discovery).
+  - name: gateway-mcp
+    app: api_http
+    host: agent-features-gateway.agent-features-system.svc.cluster.local
+    intervals: 60
+    params:
+      port: 80
+      uri: /features
+      method: GET
+      ssl: false
+    tags:
+      component: gateway
+
+  # Per-feature endpoint probe. Clone one per Feature, or drive from the
+  # catalog so monitors track features as they come and go.
+  - name: feature-echo
+    app: grpc
+    host: echo.features.svc.cluster.local
+    intervals: 60
+    params:
+      port: 9090
+    tags:
+      component: feature
+      feature: echo

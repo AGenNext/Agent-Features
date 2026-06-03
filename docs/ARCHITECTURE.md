@@ -175,20 +175,53 @@ agent ◀── result ──┘
 
 ---
 
-## 7. Target repository layout
+## 6.1 Feature supply chain
+
+How a capability goes from source to a discoverable feature — the
+platform-engineering layer *beneath* the gateway and operator:
+
+| Stage | Tool | In this repo |
+|-------|------|--------------|
+| **Build** | **Cloud Native Buildpacks** (`pack`) — source → OCI image, no Dockerfile | `examples/features/echo/project.toml` |
+| **Configure** | **KCL** — typed, validated authoring of `Feature` CRs | `config/kcl/` |
+| **Provision** | **OpenTofu** — day-0 cluster deps, operator, gateway | `infra/opentofu/` |
+| **Run** | **Kubernetes + containerd** — schedule & execute feature pods | operator-managed Deployments |
+| **Serve** | **Gateway (MCP)** + **operator** | `gateway/`, `operator/` |
+| **Observe** | **OpenTelemetry/Prometheus** (in-band) + **HertzBeat** (agentless monitor & alert) | `observability/` |
+
+```
+source ──Buildpacks──▶ OCI image ─┐
+Feature CR authored in KCL ───────┤──▶ operator reconciles ──▶ Deployment+Service
+cluster + deps via OpenTofu ──────┘        (containerd runs the pod)
+                                                     │
+                            gateway discovers (status: Ready) and routes;
+                            OTel traces + HertzBeat alerts watch it all.
+```
+
+The contract stays central: `buf generate` (see `buf.yaml`, `buf.gen.yaml`)
+produces the Go and Python stubs every stage shares.
+
+---
+
+## 7. Repository layout
 
 ```
 .
 ├── proto/agentfeatures/v1/feature.proto   # protocol-first contract (source of truth)
+├── buf.yaml, buf.gen.yaml                  # codegen (Go + Python) from the proto
 ├── docs/ARCHITECTURE.md                    # this document
-├── gateway/                                # FastAPI + MCP adapter (from scaffold)
+├── gateway/                                # FastAPI + MCP gateway (REST + /mcp)
 ├── operator/                               # Go + Kubebuilder operator
 │   ├── api/v1alpha1/feature_types.go       # Feature CRD types
-│   └── controllers/feature_controller.go   # reconciler
-├── sdk/                                     # feature-author SDKs (py/go) over the gRPC contract
-├── config/                                  # CRDs, RBAC, samples (kustomize)
-├── charts/agent-features/                   # Helm chart
-└── examples/                                # sample features + agent client
+│   ├── internal/controller/                # reconciler
+│   └── config/                             # CRD, RBAC, samples
+├── config/kcl/                             # KCL schemas to author/validate Features
+├── infra/opentofu/                         # OpenTofu: provision the platform
+├── observability/                          # OTel collector + HertzBeat monitors/alerts
+├── examples/
+│   ├── agent_client.py                     # discover-then-invoke demo (MCP)
+│   └── features/echo/                      # reference feature (Buildpacks-built)
+└── tests/                                  # gateway REST + MCP tests
 ```
 
 ---
