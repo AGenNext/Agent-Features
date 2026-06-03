@@ -1,27 +1,31 @@
 # Agent Features — Features as a Service for Agents
 
-A lightweight **agent capability marketplace**. AI agents discover modular
-*features* (tools/capabilities) and invoke them on demand over a clean HTTP API.
+A cloud-native, **agent-native** marketplace where AI agents discover modular
+*features* (tools/capabilities) and invoke them on demand. Think of it as an
+app store for agent tools: each feature publishes a self-describing manifest, so
+an agent — or an LLM doing tool-use — can browse what's available and call it
+with validated arguments.
 
-Think of it as an app store for agent tools: each feature publishes a manifest
-(name, version, description, tags, JSON input/output schemas) so an agent — or
-an LLM doing tool-use — can browse what's available and call it with validated
-arguments.
+The platform is **protocol-first**: the contract in
+[`proto/agentfeatures/v1/feature.proto`](proto/agentfeatures/v1/feature.proto)
+is the source of truth. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for
+the full reference design (Kubernetes operator, `Feature` CRD, containerd
+runtime, CNCF mapping, MCP).
 
-## Why
+## What's here today
 
-LLM agents are only as capable as the tools they can reach. Instead of baking
-every tool into every agent, this service hosts features behind a uniform
-contract:
+This repo currently implements the **gateway** — the front door agents talk to.
+It speaks **MCP** (Model Context Protocol) outward and dispatches to feature
+workloads inward. In dev mode it runs a few sample features in-process so the
+whole discover → invoke loop works with no cluster:
 
-- **Discoverable** — `GET /features` returns machine-readable manifests an agent
-  can feed straight into a tool-use loop.
-- **Self-describing** — every feature ships JSON Schema for its inputs and
-  outputs, so calls are validated before they run.
-- **Uniform invocation** — one endpoint shape, `POST /features/{name}/invoke`,
-  for every capability.
-- **Pluggable** — drop a new file in `app/features/`, decorate it, and it's
-  live. No wiring required.
+```
+Agent ──MCP──▶ Gateway ──(dev: in-process / prod: gRPC)──▶ Feature
+                └ browse catalog, validate input, route, observe
+```
+
+The Kubernetes operator and gRPC feature runtime are the next milestones (see
+the roadmap in the architecture doc).
 
 ## Quickstart
 
@@ -29,11 +33,8 @@ contract:
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# run the service
-uvicorn app.main:app --reload
-
-# interactive API docs
-open http://127.0.0.1:8000/docs
+uvicorn gateway.main:app --reload
+open http://127.0.0.1:8000/docs        # interactive REST docs
 ```
 
 ## API
@@ -43,72 +44,64 @@ open http://127.0.0.1:8000/docs
 | GET    | `/`                           | Service info                             |
 | GET    | `/health`                     | Liveness probe                           |
 | GET    | `/features`                   | Browse the catalog (filter by `tag`/`q`) |
-| GET    | `/features/{name}`            | Full manifest for one feature            |
+| GET    | `/features/{name}`            | Full manifest + status for one feature   |
 | POST   | `/features/{name}/invoke`     | Run a feature with validated inputs      |
-| GET    | `/features/{name}/stats`      | Invocation count & latency for a feature |
+| POST   | `/mcp`                        | MCP (JSON-RPC): `initialize`, `tools/list`, `tools/call` |
 
-### Browse the catalog
+### Browse and invoke (REST)
 
 ```bash
 curl http://127.0.0.1:8000/features
 curl "http://127.0.0.1:8000/features?tag=math"
-curl "http://127.0.0.1:8000/features?q=time"
-```
 
-### Invoke a feature
-
-```bash
 curl -X POST http://127.0.0.1:8000/features/calculator/invoke \
   -H 'content-type: application/json' \
   -d '{"input": {"expression": "2 * (3 + 4)"}}'
+# -> {"feature":"calculator","version":"1.0.0","output":{"result":14.0},"latency_ms":0.2}
 ```
 
-```json
-{
-  "feature": "calculator",
-  "version": "1.0.0",
-  "output": {"result": 14.0},
-  "latency_ms": 0.21
-}
+### Use it as an agent (MCP)
+
+```bash
+curl -X POST http://127.0.0.1:8000/mcp -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+
+curl -X POST http://127.0.0.1:8000/mcp -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call",
+       "params":{"name":"calculator","arguments":{"expression":"6 / 2"}}}'
 ```
 
-## Built-in features
+Each feature manifest *is* an MCP tool definition — its `input_schema` becomes
+the tool's `inputSchema` — so MCP-capable agents need no custom glue. A runnable
+client is in [`examples/agent_client.py`](examples/agent_client.py).
+
+## Sample (dev) features
 
 | Name          | Tags             | What it does                                  |
 |---------------|------------------|-----------------------------------------------|
-| `calculator`  | math             | Safely evaluates an arithmetic expression     |
-| `text_stats`  | text, nlp        | Word/char/sentence counts for a block of text |
-| `clock`       | time, utility    | Current time in a given timezone offset       |
-| `uuid`        | utility, id      | Generates one or more UUID4 identifiers        |
-| `hash`        | utility, crypto  | Hashes text with md5/sha1/sha256              |
+| `calculator`  | math, utility    | Safely evaluates an arithmetic expression     |
+| `text_stats`  | text, nlp        | Character/word/sentence counts for a text     |
+| `clock`       | time, utility    | Current time at a given UTC offset            |
 
-## Adding a feature
+In production these become independent OCI containers implementing the
+`FeatureService` gRPC contract; here they run in-process via `LocalInvoker`.
 
-Create `app/features/my_feature.py`:
+## Project layout
 
-```python
-from pydantic import BaseModel
-from app.core import Feature
-from app.registry import feature
-
-
-@feature
-class Reverse(Feature):
-    name = "reverse"
-    description = "Reverses a string."
-    tags = ["text"]
-
-    class Input(BaseModel):
-        text: str
-
-    class Output(BaseModel):
-        reversed: str
-
-    def run(self, payload: "Reverse.Input") -> "Reverse.Output":
-        return self.Output(reversed=payload.text[::-1])
 ```
-
-It's auto-discovered on startup — no registration call needed.
+proto/agentfeatures/v1/feature.proto   # protocol-first contract (source of truth)
+docs/ARCHITECTURE.md                    # full reference design + CNCF mapping
+gateway/                                # FastAPI + MCP gateway
+  ├── main.py        # app & routes (REST + /mcp)
+  ├── models.py      # Python projection of the proto
+  ├── catalog.py     # discovery: InMemoryCatalog (dev) / KubernetesCatalog (stub)
+  ├── invoker.py     # dispatch: LocalInvoker (dev) / GrpcInvoker (stub)
+  ├── validation.py  # JSON-Schema input validation
+  ├── mcp.py         # MCP (JSON-RPC) adapter
+  └── samples.py     # dev sample features
+examples/agent_client.py                # discover-then-invoke demo
+tests/test_gateway.py                   # REST + MCP end-to-end tests
+```
 
 ## Tests
 
@@ -116,9 +109,3 @@ It's auto-discovered on startup — no registration call needed.
 pip install -r requirements-dev.txt
 pytest
 ```
-
-## Using it from an agent
-
-See [`examples/agent_client.py`](examples/agent_client.py) for a tiny client
-that lists features and turns each manifest into an OpenAI/Anthropic-style
-tool definition, then invokes one.
