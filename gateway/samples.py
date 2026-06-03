@@ -16,7 +16,7 @@ from typing import Any
 
 from .catalog import InMemoryCatalog
 from .invoker import FeatureInputError, Handler, LocalInvoker
-from .models import Manifest
+from .models import Manifest, TrustTier
 
 # (manifest, handler) pairs registered below.
 _FEATURES: list[tuple[Manifest, Handler]] = []
@@ -139,6 +139,50 @@ _register(
         },
     ),
     _clock,
+)
+
+
+# --- greet: one capability, two competing vendors ---------------------------
+# Demonstrates the marketplace: the same `greet` capability provided by two
+# vendors. Acme is "verified" (outranks community), Globex ships a newer
+# version. Default resolution prefers Acme (trust beats version); a caller can
+# pin ?vendor=globex or ?version=1.2.0.
+
+_GREET_INPUT = {
+    "type": "object",
+    "properties": {"name": {"type": "string"}},
+    "required": ["name"],
+}
+_GREET_OUTPUT = {"type": "object", "properties": {"greeting": {"type": "string"}}}
+
+_register(
+    Manifest(
+        name="greet-acme",
+        capability="greet",
+        vendor="acme",
+        trust=TrustTier.VERIFIED,
+        version="1.0.0",
+        description="A formal greeting.",
+        tags=["greeting", "text"],
+        input_schema=_GREET_INPUT,
+        output_schema=_GREET_OUTPUT,
+    ),
+    lambda p: {"greeting": f"Hello, {p['name']}. — Acme"},
+)
+
+_register(
+    Manifest(
+        name="greet-globex",
+        capability="greet",
+        vendor="globex",
+        trust=TrustTier.COMMUNITY,
+        version="1.2.0",
+        description="A casual greeting.",
+        tags=["greeting", "text"],
+        input_schema=_GREET_INPUT,
+        output_schema=_GREET_OUTPUT,
+    ),
+    lambda p: {"greeting": f"hey {p['name']}!! ~globex"},
 )
 
 

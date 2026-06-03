@@ -60,6 +60,15 @@ spec:
                   type: string
                   enum: [Public, Internal, Private]
                   default: Public
+                capability:
+                  type: string
+                vendor:
+                  type: string
+                  default: community
+                trust:
+                  type: string
+                  enum: [Official, Verified, Community]
+                  default: Community
                 inputSchema:
                   type: string
                 outputSchema:

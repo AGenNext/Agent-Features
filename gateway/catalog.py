@@ -10,7 +10,15 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol, runtime_checkable
 
-from .models import Feature, Manifest, Phase, Protocol as FeatureProtocol, Visibility
+from .models import (
+    CapabilitySummary,
+    Feature,
+    Manifest,
+    Phase,
+    Protocol as FeatureProtocol,
+    TrustTier,
+    Visibility,
+)
 
 GROUP = "agentfeatures.io"
 VERSION = "v1alpha1"
@@ -24,6 +32,82 @@ _PHASE = {
     "Ready": Phase.READY,
     "Failed": Phase.FAILED,
 }
+_TRUST = {"Official": TrustTier.OFFICIAL, "Verified": TrustTier.VERIFIED, "Community": TrustTier.COMMUNITY}
+
+# Best-first ordering of trust tiers (lower sorts first).
+_TRUST_RANK = {TrustTier.OFFICIAL: 0, TrustTier.VERIFIED: 1, TrustTier.COMMUNITY: 2}
+
+
+def feature_id(feature: Feature) -> str:
+    m = feature.manifest
+    return f"{m.vendor}/{m.name}@{m.version}"
+
+
+def _semver_key(version: str) -> tuple[int, ...]:
+    """Parse ``x.y.z`` into a comparable tuple; non-numeric parts sort as 0."""
+
+    parts = version.split("-")[0].split(".")
+    out = []
+    for p in parts:
+        out.append(int(p) if p.isdigit() else 0)
+    return tuple(out)
+
+
+def rank_features(features: list[Feature]) -> list[Feature]:
+    """Order providers best-first: trust tier, then newest version, then vendor.
+
+    This is the baseline ranking; a richer engine (success rate, latency, cost
+    from the observability layer) plugs in here later.
+    """
+
+    return sorted(
+        features,
+        key=lambda f: (
+            _TRUST_RANK.get(f.manifest.trust, 9),
+            tuple(-n for n in _semver_key(f.manifest.version)),
+            f.manifest.vendor,
+        ),
+    )
+
+
+def resolve_feature(
+    features: list[Feature],
+    capability: str,
+    *,
+    version: str | None = None,
+    vendor: str | None = None,
+) -> Feature | None:
+    """Pick the best feature for a capability, honouring vendor/version pins."""
+
+    candidates = [f for f in features if f.manifest.capability == capability]
+    if vendor:
+        candidates = [f for f in candidates if f.manifest.vendor == vendor]
+    if version:
+        candidates = [f for f in candidates if f.manifest.version == version]
+    ranked = rank_features(candidates)
+    return ranked[0] if ranked else None
+
+
+def summarize_capabilities(features: list[Feature]) -> list[CapabilitySummary]:
+    """Group features into canonical capabilities with their ranked vendors."""
+
+    by_cap: dict[str, list[Feature]] = {}
+    for f in features:
+        by_cap.setdefault(f.manifest.capability, []).append(f)
+
+    summaries = []
+    for capability, group in sorted(by_cap.items()):
+        ranked = rank_features(group)
+        summaries.append(
+            CapabilitySummary(
+                capability=capability,
+                description=ranked[0].manifest.description,
+                provider_count=len(ranked),
+                vendors=[f.manifest.vendor for f in ranked],
+                preferred=feature_id(ranked[0]),
+            )
+        )
+    return summaries
 
 
 def feature_from_cr(cr: dict[str, Any]) -> Feature:
@@ -39,6 +123,9 @@ def feature_from_cr(cr: dict[str, Any]) -> Feature:
         output_schema=json.loads(spec["outputSchema"]) if spec.get("outputSchema") else {},
         visibility=_VISIBILITY.get(spec.get("visibility", "Public"), Visibility.PUBLIC),
         protocol=FeatureProtocol(spec.get("protocol", "grpc")),
+        vendor=spec.get("vendor", "community"),
+        capability=spec.get("capability", ""),
+        trust=_TRUST.get(spec.get("trust", "Community"), TrustTier.COMMUNITY),
     )
     return Feature(
         manifest=manifest,
@@ -57,6 +144,14 @@ class Catalog(Protocol):
         ...
 
     def get(self, name: str) -> Feature | None:
+        ...
+
+    def list_capabilities(self) -> list[CapabilitySummary]:
+        ...
+
+    def resolve(
+        self, capability: str, *, version: str | None = None, vendor: str | None = None
+    ) -> Feature | None:
         ...
 
 
@@ -91,6 +186,16 @@ class InMemoryCatalog:
 
     def get(self, name: str) -> Feature | None:
         return self._features.get(name)
+
+    def list_capabilities(self) -> list[CapabilitySummary]:
+        return summarize_capabilities(list(self._features.values()))
+
+    def resolve(
+        self, capability: str, *, version: str | None = None, vendor: str | None = None
+    ) -> Feature | None:
+        return resolve_feature(
+            list(self._features.values()), capability, version=version, vendor=vendor
+        )
 
 
 class KubernetesCatalog:
@@ -143,3 +248,11 @@ class KubernetesCatalog:
                 return None
             raise
         return feature_from_cr(cr)
+
+    def list_capabilities(self) -> list[CapabilitySummary]:
+        return summarize_capabilities(self.list())
+
+    def resolve(
+        self, capability: str, *, version: str | None = None, vendor: str | None = None
+    ) -> Feature | None:
+        return resolve_feature(self.list(), capability, version=version, vendor=vendor)

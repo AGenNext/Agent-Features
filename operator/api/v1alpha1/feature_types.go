@@ -24,6 +24,16 @@ const (
 	ProtocolHTTP FeatureProtocol = "http"
 )
 
+// TrustTier is how much the marketplace trusts a vendor — a ranking input.
+// +kubebuilder:validation:Enum=Official;Verified;Community
+type TrustTier string
+
+const (
+	TrustOfficial  TrustTier = "Official"
+	TrustVerified  TrustTier = "Verified"
+	TrustCommunity TrustTier = "Community"
+)
+
 // RuntimeSpec describes how the feature workload is scheduled and scaled.
 type RuntimeSpec struct {
 	// MinReplicas; 0 enables scale-to-zero (via KEDA/Knative).
@@ -68,6 +78,20 @@ type FeatureSpec struct {
 	// +kubebuilder:default=Public
 	// +optional
 	Visibility Visibility `json:"visibility,omitempty"`
+
+	// Capability is the canonical thing this feature provides; many vendors'
+	// features can share one. Defaults to the feature name if empty.
+	// +optional
+	Capability string `json:"capability,omitempty"`
+
+	// Vendor is who publishes this implementation.
+	// +kubebuilder:default=community
+	// +optional
+	Vendor string `json:"vendor,omitempty"`
+
+	// +kubebuilder:default=Community
+	// +optional
+	Trust TrustTier `json:"trust,omitempty"`
 
 	// InputSchema is a JSON Schema (draft 2020-12) for invocation arguments.
 	// It doubles as the MCP tool inputSchema. Stored as a raw string.

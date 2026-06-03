@@ -24,6 +24,10 @@ schema FeatureSpec:
     port: int = 9090
     tags?: [str]
     visibility: "Public" | "Internal" | "Private" = "Public"
+    # Marketplace identity: many vendors can provide the same capability.
+    capability?: str   # defaults to the feature name if unset
+    vendor: str = "community"
+    trust: "Official" | "Verified" | "Community" = "Community"
     # JSON Schema (draft 2020-12) for invocation arguments; doubles as the
     # MCP tool inputSchema.
     inputSchema?: str

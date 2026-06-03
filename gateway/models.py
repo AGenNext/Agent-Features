@@ -11,7 +11,15 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+class TrustTier(str, Enum):
+    """How much the marketplace trusts a vendor — a ranking input."""
+
+    OFFICIAL = "official"   # first-party / platform-owned
+    VERIFIED = "verified"   # reviewed third party
+    COMMUNITY = "community" # unreviewed
 
 
 class Visibility(str, Enum):
@@ -33,7 +41,13 @@ class Phase(str, Enum):
 
 
 class Manifest(BaseModel):
-    """Self-describing record of a capability — maps 1:1 onto an MCP tool."""
+    """Self-describing record of a feature.
+
+    ``name`` is the unique handle for *this* implementation. ``capability`` is
+    the canonical thing it provides (many vendors' features can share one
+    capability); it defaults to ``name``. ``vendor`` is who publishes it. The
+    marketplace key is therefore ``(capability, vendor, version)``.
+    """
 
     name: str
     version: str = "1.0.0"
@@ -43,6 +57,17 @@ class Manifest(BaseModel):
     output_schema: dict[str, Any] = Field(default_factory=dict)
     visibility: Visibility = Visibility.PUBLIC
     protocol: Protocol = Protocol.GRPC
+
+    # Marketplace identity.
+    vendor: str = "community"
+    capability: str = ""
+    trust: TrustTier = TrustTier.COMMUNITY
+
+    @model_validator(mode="after")
+    def _default_capability(self) -> "Manifest":
+        if not self.capability:
+            self.capability = self.name
+        return self
 
 
 class Feature(BaseModel):
@@ -72,3 +97,15 @@ class InvokeResponse(BaseModel):
     version: str
     output: dict[str, Any]
     latency_ms: float
+    vendor: str = "community"
+
+
+class CapabilitySummary(BaseModel):
+    """A canonical capability and the vendors that provide it (ranked)."""
+
+    capability: str
+    description: str = ""
+    provider_count: int
+    vendors: list[str] = Field(default_factory=list)
+    # The provider the marketplace would pick by default, as "vendor/name@version".
+    preferred: str | None = None

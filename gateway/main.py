@@ -20,9 +20,9 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 
 from . import __version__, mcp
-from .catalog import Catalog
+from .catalog import Catalog, rank_features
 from .invoker import FeatureInputError, FeatureUnavailable, Invoker
-from .models import Feature, InvokeRequest, InvokeResponse
+from .models import CapabilitySummary, Feature, InvokeRequest, InvokeResponse
 from .samples import build_dev_catalog_and_invoker
 from .validation import ValidationError, validate
 
@@ -87,11 +87,8 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
             raise HTTPException(status_code=404, detail=f"unknown feature: {name}")
         return feature
 
-    @app.post("/features/{name}/invoke", response_model=InvokeResponse)
-    async def invoke_feature(name: str, body: InvokeRequest) -> InvokeResponse:
-        feature = catalog.get(name)
-        if feature is None:
-            raise HTTPException(status_code=404, detail=f"unknown feature: {name}")
+    async def _invoke(feature: Feature, body: InvokeRequest) -> InvokeResponse:
+        name = feature.manifest.name
         try:
             validate(body.input, feature.manifest.input_schema)
         except ValidationError as exc:
@@ -112,7 +109,47 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
             version=feature.manifest.version,
             output=result.output,
             latency_ms=result.latency_ms,
+            vendor=feature.manifest.vendor,
         )
+
+    @app.post("/features/{name}/invoke", response_model=InvokeResponse)
+    async def invoke_feature(name: str, body: InvokeRequest) -> InvokeResponse:
+        feature = catalog.get(name)
+        if feature is None:
+            raise HTTPException(status_code=404, detail=f"unknown feature: {name}")
+        return await _invoke(feature, body)
+
+    @app.get("/capabilities", response_model=list[CapabilitySummary])
+    def list_capabilities() -> list[CapabilitySummary]:
+        return catalog.list_capabilities()
+
+    @app.get("/capabilities/{capability}", response_model=list[Feature])
+    def get_capability(capability: str) -> list[Feature]:
+        # All providers of the capability, best-first.
+        providers = rank_features(
+            [f for f in catalog.list() if f.manifest.capability == capability]
+        )
+        if not providers:
+            raise HTTPException(status_code=404, detail=f"unknown capability: {capability}")
+        return providers
+
+    @app.post("/capabilities/{capability}/invoke", response_model=InvokeResponse)
+    async def invoke_capability(
+        capability: str,
+        body: InvokeRequest,
+        vendor: str | None = None,
+        version: str | None = None,
+    ) -> InvokeResponse:
+        # The marketplace picks the best provider (or honours a vendor/version pin).
+        feature = catalog.resolve(capability, version=version, vendor=vendor)
+        if feature is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no provider for capability '{capability}'"
+                + (f" (vendor={vendor})" if vendor else "")
+                + (f" (version={version})" if version else ""),
+            )
+        return await _invoke(feature, body)
 
     @app.post("/mcp")
     async def mcp_endpoint(request: Request) -> dict[str, Any] | None:

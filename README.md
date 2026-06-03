@@ -46,6 +46,9 @@ open http://127.0.0.1:8000/docs        # interactive REST docs
 | GET    | `/features`                   | Browse the catalog (filter by `tag`/`q`) |
 | GET    | `/features/{name}`            | Full manifest + status for one feature   |
 | POST   | `/features/{name}/invoke`     | Run a feature with validated inputs      |
+| GET    | `/capabilities`               | Canonical capabilities + their ranked vendors |
+| GET    | `/capabilities/{cap}`         | All providers of a capability, best-first |
+| POST   | `/capabilities/{cap}/invoke`  | Resolve the best provider and invoke (pin with `?vendor=`/`?version=`) |
 | POST   | `/mcp`                        | MCP (JSON-RPC): `initialize`, `tools/list`, `tools/call` |
 
 ### Browse and invoke (REST)
@@ -74,6 +77,30 @@ curl -X POST http://127.0.0.1:8000/mcp -H 'content-type: application/json' \
 Each feature manifest *is* an MCP tool definition — its `input_schema` becomes
 the tool's `inputSchema` — so MCP-capable agents need no custom glue. A runnable
 client is in [`examples/agent_client.py`](examples/agent_client.py).
+
+## Marketplace: capabilities & vendors
+
+A **feature** is one vendor's implementation (unique `name`, `version`,
+`vendor`, `trust` tier). A **capability** is the canonical thing it provides —
+many vendors can compete on the same capability. The marketplace key is
+`(capability, vendor, version)`.
+
+```bash
+curl http://127.0.0.1:8000/capabilities          # canonical capabilities + ranked vendors
+curl http://127.0.0.1:8000/capabilities/greet     # every provider, best-first
+
+# Let the marketplace pick the best provider...
+curl -X POST http://127.0.0.1:8000/capabilities/greet/invoke \
+  -H 'content-type: application/json' -d '{"input":{"name":"Ada"}}'
+# ...or pin a vendor / version:
+curl -X POST "http://127.0.0.1:8000/capabilities/greet/invoke?vendor=globex" ...
+```
+
+**Ranking** (baseline) orders providers by trust tier → newest version → vendor.
+A richer engine (success rate, latency, cost — fed by the observability layer)
+plugs into `rank_features` in `gateway/catalog.py`. The `greet` capability ships
+with two demo vendors (`acme`, verified; `globex`, community) to show
+resolution and pinning.
 
 ## Sample (dev) features
 

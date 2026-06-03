@@ -42,6 +42,12 @@ message Manifest {
 
   Visibility visibility = 7;
   Protocol protocol = 8;           // how the gateway reaches the workload
+
+  // Marketplace identity. Many vendors' features can share one capability;
+  // the marketplace key is (capability, vendor, version).
+  string capability = 9;           // canonical capability; defaults to name
+  string vendor = 10;              // who publishes this implementation
+  TrustTier trust = 11;            // ranking input
 }
 
 enum Visibility {
@@ -49,6 +55,13 @@ enum Visibility {
   VISIBILITY_PUBLIC = 1;           // discoverable by any agent
   VISIBILITY_INTERNAL = 2;         // discoverable within the cluster/tenant
   VISIBILITY_PRIVATE = 3;          // owner-only
+}
+
+enum TrustTier {
+  TRUST_TIER_UNSPECIFIED = 0;
+  TRUST_TIER_OFFICIAL = 1;         // first-party / platform-owned
+  TRUST_TIER_VERIFIED = 2;         // reviewed third party
+  TRUST_TIER_COMMUNITY = 3;        // unreviewed
 }
 
 enum Protocol {
