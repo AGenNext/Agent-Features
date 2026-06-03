@@ -1,0 +1,18 @@
+# Kubebuilder project metadata.
+# See https://book.kubebuilder.io/reference/project-config
+domain: agentfeatures.io
+layout:
+- go.kubebuilder.io/v4
+projectName: agent-features-operator
+repo: github.com/AGenNext/Agent-Features/operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: agentfeatures.io
+  group: agentfeatures
+  kind: Feature
+  path: github.com/AGenNext/Agent-Features/operator/api/v1alpha1
+  version: v1alpha1
+version: "3"
