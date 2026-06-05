@@ -23,6 +23,8 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__, mcp
 from .catalog import Catalog, feature_id, match_version
+from .composer import Composer, Composite, CompositeResult, CompositeSummary
+from .composites import build_dev_composites
 from .invoker import FeatureInputError, FeatureUnavailable, Invoker
 from .models import (
     CapabilitySummary,
@@ -30,6 +32,7 @@ from .models import (
     InvokeRequest,
     InvokeResponse,
     ProviderScore,
+    RequestContext,
 )
 from .ranking import BaselinePolicy, MetricsPolicy, MetricsStore, RankingPolicy
 from .samples import build_dev_catalog_and_invoker
@@ -212,6 +215,78 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
                 + (f" (version={version})" if version else ""),
             )
         return await _invoke(ranked[0], body)
+
+    # --- composition: orchestrate capabilities into a pipeline ---------------
+
+    async def _run_capability(
+        capability: str,
+        input_dict: dict[str, Any],
+        vendor: str | None = None,
+        version: str | None = None,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """Resolve + invoke one capability for a composite.
+
+        Returns ``(output, None)`` on success or ``(None, message)`` on failure,
+        where ``message`` is a safe, caller-facing string (never an exception
+        string — internals are logged, not returned).
+        """
+        ranked = policy.rank(_providers(capability, vendor=vendor, version=version), store)
+        if not ranked:
+            return None, f"no provider for capability '{capability}'"
+        feature = ranked[0]
+        fid = feature_id(feature)
+        errors = collect_errors(input_dict, feature.manifest.input_schema)
+        if errors:
+            return None, "invalid input: " + "; ".join(errors)
+        try:
+            result = await invoker.invoke(feature.manifest.name, input_dict, RequestContext())
+        except FeatureInputError as exc:
+            logger.info("composite step %s rejected input: %s", capability, exc)
+            return None, "the feature rejected the input"
+        except FeatureUnavailable as exc:
+            store.record(fid, success=False)
+            logger.warning("composite step %s unavailable: %s", capability, exc)
+            return None, "the provider is currently unavailable"
+        store.record(fid, success=True, latency_ms=result.latency_ms)
+        return result.output, None
+
+    composer = Composer(_run_capability)
+    composites: dict[str, Composite] = {c.name: c for c in build_dev_composites()}
+
+    def _composite_summary(c: Composite) -> CompositeSummary:
+        return CompositeSummary(
+            name=c.name,
+            capability=c.capability,
+            description=c.description,
+            steps=[{"name": s.name, "capability": s.capability} for s in c.steps],
+        )
+
+    @app.get("/composites", response_model=list[CompositeSummary])
+    def list_composites() -> list[CompositeSummary]:
+        return [_composite_summary(c) for c in composites.values()]
+
+    @app.get("/composites/{name}", response_model=Composite)
+    def get_composite(name: str) -> Composite:
+        if name not in composites:
+            raise HTTPException(status_code=404, detail=f"unknown composite: {name}")
+        return composites[name]
+
+    @app.post("/compose", response_model=CompositeSummary, status_code=201)
+    def compose(spec: Composite) -> CompositeSummary:
+        # Publish a composition to the registry — a developer assembling an agent
+        # from marketplace capabilities, the way a compose file references images.
+        composites[spec.name] = spec
+        return _composite_summary(spec)
+
+    @app.post("/composites/{name}/invoke", response_model=CompositeResult)
+    async def invoke_composite(name: str, body: InvokeRequest) -> CompositeResult:
+        composite = composites.get(name)
+        if composite is None:
+            raise HTTPException(status_code=404, detail=f"unknown composite: {name}")
+        errors = collect_errors(body.input, composite.input_schema)
+        if errors:
+            raise HTTPException(status_code=422, detail=errors)
+        return await composer.run(composite, body.input)
 
     @app.post("/mcp")
     async def mcp_endpoint(request: Request) -> dict[str, Any] | None:
