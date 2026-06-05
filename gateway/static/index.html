@@ -201,6 +201,31 @@
         </div>
       </div>
     </section>
+
+    <section class="panel invoke">
+      <h2>Orchestrator · flow builder <span class="count" id="flowCount">0</span></h2>
+      <div class="body">
+        <div>
+          <div class="field"><label>Open an existing composite</label><div id="flowList" class="tags"></div></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="field"><label for="flowName">Name</label><input id="flowName" placeholder="greet-report" /></div>
+            <div class="field"><label for="flowDesc">Description</label><input id="flowDesc" /></div>
+          </div>
+          <div class="field"><label for="flowInput">Input schema (JSON)</label><textarea id="flowInput" spellcheck="false" style="min-height:80px"></textarea></div>
+          <div class="field"><label>Steps — each invokes a capability; map inputs with refs like <code>input.name</code> or <code>stepName.field</code></label>
+            <div id="flowSteps"></div>
+            <button class="ghost" id="flowAddStep" style="margin-top:6px">+ Step</button>
+          </div>
+          <div class="field"><label for="flowOutput">Output mapping (JSON: field → ref)</label><textarea id="flowOutput" spellcheck="false" style="min-height:60px"></textarea></div>
+          <div class="tags"><button id="flowPublish">Publish ▸</button><button class="ghost" id="flowRun">Run</button></div>
+        </div>
+        <div>
+          <div class="field"><label>Flow</label><div id="flowDiagram" class="tags"></div></div>
+          <div class="field"><label for="flowRunInput">Run input (JSON)</label><textarea id="flowRunInput" spellcheck="false" style="min-height:60px">{}</textarea></div>
+          <pre id="flowOut">Build a pipeline, Publish it, then Run to see output + per-step trace.</pre>
+        </div>
+      </div>
+    </section>
   </div>
 
 <script>
@@ -533,6 +558,116 @@ function prefillGenerator() {
 const match = (q, ...fields) => !q || fields.some(f => (f || "").toLowerCase().includes(q.toLowerCase()));
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+// --- Orchestrator / flow builder: compose capabilities into a pipeline ------
+let FLOW_STEPS = [];
+
+function capOptions(sel) {
+  return CAPS.map(c => `<option value="${esc(c.capability)}"${c.capability === sel ? " selected" : ""}>${esc(c.capability)}</option>`).join("");
+}
+
+function renderSteps() {
+  $("flowSteps").innerHTML = FLOW_STEPS.map((s, i) => `
+    <div class="evalrow" data-i="${i}" style="grid-template-columns:90px 1fr 1.3fr auto">
+      <input class="stepName" value="${esc(s.name)}" placeholder="step" />
+      <select class="stepCap">${capOptions(s.capability)}</select>
+      <input class="stepInputs" value="${esc(s.inputs)}" placeholder='{"name":"input.name"}' />
+      <button class="ghost stepDel" title="remove">✕</button>
+    </div>`).join("") || `<div class="empty">No steps yet — add one.</div>`;
+  for (const row of $("flowSteps").querySelectorAll(".evalrow")) {
+    const i = +row.dataset.i;
+    row.querySelector(".stepName").oninput = e => { FLOW_STEPS[i].name = e.target.value; renderFlowDiagram(); };
+    row.querySelector(".stepCap").onchange = e => { FLOW_STEPS[i].capability = e.target.value; renderFlowDiagram(); };
+    row.querySelector(".stepInputs").oninput = e => { FLOW_STEPS[i].inputs = e.target.value; };
+    row.querySelector(".stepDel").onclick = () => { FLOW_STEPS.splice(i, 1); renderSteps(); renderFlowDiagram(); };
+  }
+  renderFlowDiagram();
+}
+
+function renderFlowDiagram() {
+  const node = (label, sub) => `<span class="chip" style="padding:4px 10px">${esc(label)}${sub ? `<br><span class="meta" style="font-size:10px">${esc(sub)}</span>` : ""}</span>`;
+  const arrow = `<span style="color:var(--muted)">→</span>`;
+  const parts = [node("input")];
+  for (const s of FLOW_STEPS) { parts.push(arrow, node(s.name || "step", s.capability)); }
+  parts.push(arrow, node("output"));
+  $("flowDiagram").innerHTML = parts.join(" ");
+}
+
+function buildSpec() {
+  const steps = [];
+  for (const s of FLOW_STEPS) {
+    let inputs;
+    try { inputs = JSON.parse(s.inputs || "{}"); }
+    catch { throw new Error(`step '${s.name}': inputs is not valid JSON`); }
+    steps.push({ name: s.name, capability: s.capability, inputs });
+  }
+  return {
+    name: $("flowName").value.trim(),
+    description: $("flowDesc").value.trim(),
+    input_schema: JSON.parse($("flowInput").value || "{}"),
+    steps,
+    output: JSON.parse($("flowOutput").value || "{}"),
+  };
+}
+
+async function publishComposite() {
+  let spec;
+  try { spec = buildSpec(); } catch (e) { $("flowOut").className = "err"; $("flowOut").textContent = e.message; return; }
+  if (!spec.name) { $("flowOut").className = "err"; $("flowOut").textContent = "Name is required."; return; }
+  try {
+    await api("/compose", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(spec) });
+    $("flowOut").className = ""; $("flowOut").textContent = `Published composite '${spec.name}'.`;
+    notify(`Published composite ${spec.name}`, "success");
+    loadComposites();
+  } catch (e) { $("flowOut").className = "err"; $("flowOut").textContent = e.message; notify(`Publish failed: ${e.message}`, "error"); }
+}
+
+async function runComposite() {
+  const name = $("flowName").value.trim();
+  if (!name) { $("flowOut").className = "err"; $("flowOut").textContent = "Name a composite (and Publish) first."; return; }
+  let input;
+  try { input = JSON.parse($("flowRunInput").value || "{}"); }
+  catch (e) { $("flowOut").className = "err"; $("flowOut").textContent = "Run input is not valid JSON: " + e.message; return; }
+  try {
+    const res = await api(`/composites/${encodeURIComponent(name)}/invoke`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ input }),
+    });
+    const trace = res.trace.map(t => `  ${t.step} (${t.capability}) → ${JSON.stringify(t.output)}`).join("\n");
+    $("flowOut").className = res.error ? "err" : "";
+    $("flowOut").textContent = (res.error ? `error: ${res.error}\n\n` : "") +
+      `output: ${JSON.stringify(res.output, null, 2)}\n\ntrace:\n${trace || "  (none)"}`;
+    notify(res.error ? `${name}: ${res.error}` : `Ran composite ${name}`, res.error ? "error" : "success");
+    if (selectedCap) selectCap(selectedCap);
+  } catch (e) { $("flowOut").className = "err"; $("flowOut").textContent = e.message; notify(`${name} failed: ${e.message}`, "error"); }
+}
+
+async function loadComposites() {
+  let list = [];
+  try { list = await api("/composites"); } catch { /* endpoint absent → no-op */ }
+  $("flowCount").textContent = list.length;
+  $("flowList").innerHTML = list.map(c => `<span class="chip pick flowopen" data-n="${esc(c.name)}">${esc(c.name)}</span>`).join("")
+    || `<div class="empty" style="padding:6px">none yet</div>`;
+  for (const el of $("flowList").querySelectorAll(".flowopen")) el.onclick = () => loadComposite(el.dataset.n);
+}
+
+async function loadComposite(name) {
+  const c = await api(`/composites/${encodeURIComponent(name)}`);
+  $("flowName").value = c.name; $("flowDesc").value = c.description || "";
+  $("flowInput").value = JSON.stringify(c.input_schema || {}, null, 2);
+  $("flowOutput").value = JSON.stringify(c.output || {}, null, 2);
+  FLOW_STEPS = (c.steps || []).map(s => ({
+    name: s.name, capability: s.capability, vendor: s.vendor, version: s.version,
+    inputs: JSON.stringify(s.inputs || {}),
+  }));
+  renderSteps();
+}
+
+function initFlowBuilder() {
+  if (!$("flowInput").value)
+    $("flowInput").value = JSON.stringify({ type: "object", properties: { name: { type: "string" } }, required: ["name"] }, null, 2);
+  if (FLOW_STEPS.length === 0) FLOW_STEPS = [{ name: "step1", capability: CAPS[0]?.capability || "", inputs: "{}" }];
+  renderSteps(); loadComposites();
+}
+
 // --- Notifications: a client-side activity feed + toasts --------------------
 const NOTIFS = []; let unseen = 0;
 function notify(message, kind = "info") {
@@ -564,7 +699,7 @@ async function loadAll() {
   try {
     [FEATURES, CAPS] = await Promise.all([api("/features"), api("/capabilities")]);
     renderStats(); renderCaps($("search").value); renderFeats($("search").value);
-    fillFeatureSelect(); renderComparatorPicker();
+    fillFeatureSelect(); renderComparatorPicker(); initFlowBuilder();
   } catch (e) {
     $("caps").innerHTML = $("feats").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
@@ -577,6 +712,9 @@ $("invFeature").onchange = onFeaturePick;
 $("evalRun").onclick = runEvaluator;
 $("evalFeature").onchange = onEvalPick;
 $("genRun").onclick = generate;
+$("flowAddStep").onclick = () => { FLOW_STEPS.push({ name: "step" + (FLOW_STEPS.length + 1), capability: CAPS[0]?.capability || "", inputs: "{}" }); renderSteps(); };
+$("flowPublish").onclick = publishComposite;
+$("flowRun").onclick = runComposite;
 $("genCopy").onclick = () => genActive && navigator.clipboard?.writeText(GEN_ARTIFACTS[genActive]);
 $("genDownload").onclick = () => {
   if (!genActive) return;

@@ -19,6 +19,7 @@ def test_ui_served_at_slash_ui():
     for marker in (
         "Agent Features", "Live ranking", "Invoke console", "Capabilities",
         "Comparator", "Evaluator", "Component generator",
+        "Orchestrator", "flow builder",
     ):
         assert marker in r.text
 
