@@ -53,6 +53,60 @@ def _semver_key(version: str) -> tuple[int, ...]:
     return tuple(out)
 
 
+def _triple(version: str) -> tuple[int, int, int]:
+    """Normalize a version to a (major, minor, patch) triple."""
+
+    key = list(_semver_key(version)) + [0, 0, 0]
+    return key[0], key[1], key[2]
+
+
+def match_version(version: str, spec: str) -> bool:
+    """Does ``version`` satisfy ``spec``? Supports a useful npm-style subset.
+
+    - ``""`` / ``*`` / ``latest`` / ``x`` → any version
+    - ``^1.2.3`` caret → compatible-with (same left-most non-zero)
+    - ``~1.2.3`` tilde → patch-level (or minor if only ``~1``)
+    - ``>=`` ``>`` ``<=`` ``<`` ``=`` comparators
+    - bare ``1.2.3`` → exact
+    """
+
+    spec = spec.strip()
+    if spec in ("", "*", "latest", "x", "X"):
+        return True
+    v = _triple(version)
+
+    if spec[0] == "^":
+        base = _triple(spec[1:])
+        if base[0] > 0:
+            upper = (base[0] + 1, 0, 0)
+        elif base[1] > 0:
+            upper = (0, base[1] + 1, 0)
+        else:
+            upper = (0, 0, base[2] + 1)
+        return base <= v < upper
+
+    if spec[0] == "~":
+        comps = spec[1:].split(".")
+        base = _triple(spec[1:])
+        upper = (base[0], base[1] + 1, 0) if len(comps) >= 2 else (base[0] + 1, 0, 0)
+        return base <= v < upper
+
+    for op in (">=", "<=", ">", "<", "=="):
+        if spec.startswith(op):
+            base = _triple(spec[len(op):])
+            if op == ">=":
+                return v >= base
+            if op == "<=":
+                return v <= base
+            if op == ">":
+                return v > base
+            if op == "<":
+                return v < base
+            return v == base
+
+    return v == _triple(spec)
+
+
 def rank_features(features: list[Feature]) -> list[Feature]:
     """Order providers best-first: trust tier, then newest version, then vendor.
 
@@ -83,7 +137,7 @@ def resolve_feature(
     if vendor:
         candidates = [f for f in candidates if f.manifest.vendor == vendor]
     if version:
-        candidates = [f for f in candidates if f.manifest.version == version]
+        candidates = [f for f in candidates if match_version(f.manifest.version, version)]
     ranked = rank_features(candidates)
     return ranked[0] if ranked else None
 

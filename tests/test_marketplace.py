@@ -53,6 +53,26 @@ def test_invoke_capability_version_pin():
     assert res["vendor"] == "globex"
 
 
+def test_invoke_capability_caret_range_selects_globex():
+    # ^1.2.0 excludes acme@1.0.0; only globex@1.2.0 satisfies it.
+    res = client.post(
+        "/capabilities/greet/invoke",
+        params={"version": "^1.2.0"},
+        json={"input": {"name": "Ada"}},
+    ).json()
+    assert res["vendor"] == "globex"
+
+
+def test_invoke_capability_tilde_range_selects_acme():
+    # ~1.0.0 is >=1.0.0 <1.1.0; only acme@1.0.0 satisfies it.
+    res = client.post(
+        "/capabilities/greet/invoke",
+        params={"version": "~1.0.0"},
+        json={"input": {"name": "Ada"}},
+    ).json()
+    assert res["vendor"] == "acme"
+
+
 def test_invoke_capability_no_provider_404():
     res = client.post(
         "/capabilities/greet/invoke",

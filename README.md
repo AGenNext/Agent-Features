@@ -92,9 +92,14 @@ curl http://127.0.0.1:8000/capabilities/greet     # every provider, best-first
 # Let the marketplace pick the best provider...
 curl -X POST http://127.0.0.1:8000/capabilities/greet/invoke \
   -H 'content-type: application/json' -d '{"input":{"name":"Ada"}}'
-# ...or pin a vendor / version:
+# ...or pin a vendor / version (ranges supported):
 curl -X POST "http://127.0.0.1:8000/capabilities/greet/invoke?vendor=globex" ...
+curl -X POST "http://127.0.0.1:8000/capabilities/greet/invoke?version=^1.2.0" ...
 ```
+
+**Versioning** — `?version=` accepts exact (`1.2.0`), caret (`^1.2`), tilde
+(`~1.2`), comparators (`>=1.2.0`, `<2.0.0`), or `latest`/`*`. Among satisfying
+providers the marketplace still applies ranking (below).
 
 **Ranking** (baseline) orders providers by trust tier → newest version → vendor.
 A richer engine (success rate, latency, cost — fed by the observability layer)
