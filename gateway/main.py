@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, mcp
+from . import __version__, mcp, signing
 from .catalog import Catalog, feature_id, match_version
 from .composer import Composer, Composite, CompositeResult, CompositeSummary
 from .composites import build_dev_composites
@@ -119,6 +119,15 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
         if feature is None:
             raise HTTPException(status_code=404, detail=f"unknown feature: {name}")
         return feature
+
+    @app.get("/features/{name}/signature")
+    def feature_signature(name: str) -> dict[str, Any]:
+        # Supply-chain provenance: the manifest's canonical digest plus its
+        # Sigstore/cosign verification status (see gateway/signing.py).
+        feature = catalog.get(name)
+        if feature is None:
+            raise HTTPException(status_code=404, detail=f"unknown feature: {name}")
+        return signing.verify(name, feature.manifest.model_dump(mode="json"))
 
     async def _invoke(feature: Feature, body: InvokeRequest) -> InvokeResponse:
         name = feature.manifest.name

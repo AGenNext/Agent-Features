@@ -186,6 +186,15 @@
       </div>
     </section>
 
+    <section class="panel">
+      <h2>Provenance · signer <span class="count">sigstore</span></h2>
+      <div class="body">
+        <div class="field"><label for="sigFeature">Feature</label><select id="sigFeature"></select></div>
+        <button id="sigCheck">Check signature ▸</button>
+        <div id="sigOut" style="margin-top:10px"><div class="empty">Check a feature's manifest digest and its Sigstore/cosign status.</div></div>
+      </div>
+    </section>
+
     <section class="panel invoke">
       <h2>Component generator <span class="count">scaffold + schema.org</span></h2>
       <div class="body">
@@ -378,8 +387,29 @@ function featureOptions() {
 function fillFeatureSelect() {
   $("invFeature").innerHTML = featureOptions();
   $("evalFeature").innerHTML = featureOptions();
+  $("sigFeature").innerHTML = featureOptions();
   onFeaturePick();
   onEvalPick();
+}
+
+// --- Provenance / signer: manifest digest + Sigstore status -----------------
+async function checkSignature() {
+  const name = $("sigFeature").value;
+  $("sigOut").innerHTML = `<div class="empty">Checking…</div>`;
+  try {
+    const s = await api(`/features/${encodeURIComponent(name)}/signature`);
+    const color = s.status === "verified" ? "var(--accent-2)" : s.status === "failed" ? "var(--danger)" : "var(--muted)";
+    $("sigOut").innerHTML = `
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+        <span class="chip" style="color:#fff;background:${color}">${esc(s.status)}</span>
+        <span class="meta">${s.signed ? "bundle present" : "no signature bundle"}</span></div>
+      <div class="field"><label>Manifest digest (${esc(s.algorithm)})</label><pre style="min-height:auto">${esc(s.digest)}</pre></div>
+      ${s.reason ? `<div class="meta" style="margin-bottom:6px">${esc(s.reason)}</div>` : ""}
+      <div class="field"><label>Verify with cosign</label><pre style="min-height:auto">${esc(s.command)}</pre></div>
+      <button class="ghost" id="sigCopy">Copy command</button>`;
+    $("sigCopy").onclick = () => navigator.clipboard?.writeText(s.command);
+    notify(`Signature ${name}: ${s.status}`, s.status === "failed" ? "error" : "info");
+  } catch (e) { $("sigOut").innerHTML = `<div class="empty bad">${esc(e.message)}</div>`; }
 }
 
 // --- Comparator: pick N features, diff their manifests side by side ---------
@@ -776,6 +806,7 @@ $("flowPublish").onclick = publishComposite;
 $("flowRun").onclick = runComposite;
 $("chatSend").onclick = chatSend;
 $("chatInput").onkeydown = e => { if (e.key === "Enter") chatSend(); };
+$("sigCheck").onclick = checkSignature;
 $("genCopy").onclick = () => genActive && navigator.clipboard?.writeText(GEN_ARTIFACTS[genActive]);
 $("genDownload").onclick = () => {
   if (!genActive) return;

@@ -23,3 +23,7 @@ gen/
 .vscode/
 .idea/
 .DS_Store
+
+# Generated signing artifacts (produced in CI)
+manifests/
+signatures/
