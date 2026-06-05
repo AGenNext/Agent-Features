@@ -127,8 +127,15 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
         try:
             result = await invoker.invoke(name, body.input, body.context)
         except FeatureInputError as exc:
-            # Caller error too — surface it, but don't penalise the feature.
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            # Caller error too — don't penalise the feature. Log the specifics
+            # server-side and return a generic message: the exception string can
+            # carry feature/transport internals (e.g. gRPC details), so we never
+            # echo it to the caller. Detailed input feedback already comes from
+            # our own schema validation above.
+            logger.info("feature %s rejected input: %s", name, exc)
+            raise HTTPException(
+                status_code=422, detail=f"feature '{name}' rejected the input"
+            ) from exc
         except FeatureUnavailable as exc:
             store.record(fid, success=False)
             logger.warning("feature %s unavailable: %s", name, exc)

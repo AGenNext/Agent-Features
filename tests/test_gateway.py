@@ -58,29 +58,38 @@ def test_invoke_validation_error():
     assert res.status_code == 422
 
 
-def test_invoke_feature_input_error():
+def test_invoke_feature_input_error(caplog):
     # Schema-valid string, but not a usable expression -> controlled 422,
-    # not an opaque 500.
-    res = client.post(
-        "/features/calculator/invoke",
-        json={"input": {"expression": "2 +"}},
-    )
+    # not an opaque 500. The caller gets a generic message; the internal detail
+    # ("invalid expression") is logged, never echoed (CodeQL: info exposure).
+    with caplog.at_level("INFO"):
+        res = client.post(
+            "/features/calculator/invoke",
+            json={"input": {"expression": "2 +"}},
+        )
     assert res.status_code == 422
-    assert "invalid expression" in res.json()["detail"]
+    assert res.json()["detail"] == "feature 'calculator' rejected the input"
+    assert "invalid expression" not in res.text
+    assert "invalid expression" in caplog.text
 
 
-def test_mcp_call_feature_input_error():
-    res = client.post(
-        "/mcp",
-        json={
-            "jsonrpc": "2.0",
-            "id": 7,
-            "method": "tools/call",
-            "params": {"name": "calculator", "arguments": {"expression": "2 +"}},
-        },
-    ).json()
-    assert res["result"]["isError"] is True
-    assert "invalid expression" in res["result"]["content"][0]["text"]
+def test_mcp_call_feature_input_error(caplog):
+    with caplog.at_level("INFO"):
+        res = client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {"name": "calculator", "arguments": {"expression": "2 +"}},
+            },
+        )
+    body = res.json()
+    assert body["result"]["isError"] is True
+    text = body["result"]["content"][0]["text"]
+    assert text == "feature 'calculator' rejected the input"
+    assert "invalid expression" not in res.text
+    assert "invalid expression" in caplog.text
 
 
 def test_invoke_unknown_feature_404():

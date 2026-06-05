@@ -86,7 +86,12 @@ async def _call(msg_id, params, catalog: Catalog, invoker: Invoker) -> dict[str,
         # exception itself so no internal detail leaks.
         return _tool_error(msg_id, "invalid input: " + "; ".join(exc.errors))
     except FeatureInputError as exc:
-        return _tool_error(msg_id, str(exc))
+        # Log the specifics; return a generic message. The exception string can
+        # carry feature/transport internals (e.g. gRPC details), so we never
+        # echo it to the caller — the schema-validation branch above already
+        # gives precise, safe feedback about the caller's own input.
+        logger.info("feature %s rejected input: %s", name, exc)
+        return _tool_error(msg_id, f"feature '{name}' rejected the input")
     except FeatureUnavailable as exc:
         # Log the cause server-side; return a generic message to the caller.
         logger.warning("feature %s unavailable: %s", name, exc)
