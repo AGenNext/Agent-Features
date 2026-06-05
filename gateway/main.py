@@ -18,6 +18,8 @@ import os
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import __version__, mcp
 from .catalog import Catalog, feature_id, match_version
@@ -94,6 +96,7 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
         return {
             "service": "agent-features-gateway",
             "version": __version__,
+            "ui": "/ui",
             "endpoints": ["/health", "/features", "/features/{name}", "/features/{name}/invoke", "/mcp"],
         }
 
@@ -206,6 +209,15 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
     async def mcp_endpoint(request: Request) -> dict[str, Any] | None:
         message = await request.json()
         return await mcp.handle(message, catalog, invoker)
+
+    # The marketplace dashboard — a static, framework-free SPA that consumes the
+    # REST API above (same-origin, so no CORS). Served at /ui.
+    @app.get("/ui", include_in_schema=False)
+    def ui_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/ui/")
+
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    app.mount("/ui", StaticFiles(directory=static_dir, html=True), name="ui")
 
     return app
 

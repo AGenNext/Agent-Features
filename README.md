@@ -34,8 +34,17 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 uvicorn gateway.main:app --reload
+open http://127.0.0.1:8000/ui          # marketplace dashboard
 open http://127.0.0.1:8000/docs        # interactive REST docs
 ```
+
+### Marketplace dashboard
+
+A zero-build dashboard ships with the gateway at **`/ui`** — a framework-free
+SPA that consumes the REST API below (same-origin, no toolchain). It's a *panel
+of panels*: browse **capabilities**, watch the **live vendor ranking** update as
+calls succeed, scan the **feature** catalog, and exercise any feature from the
+**invoke console**.
 
 Or run it in a container with Docker Compose (gateway in dev mode — the whole
 marketplace, no cluster):
@@ -53,6 +62,7 @@ docker compose --profile observability up --build    # + HertzBeat monitoring
 | Method | Path                          | Purpose                                  |
 |--------|-------------------------------|------------------------------------------|
 | GET    | `/`                           | Service info                             |
+| GET    | `/ui`                         | Marketplace dashboard (static SPA)       |
 | GET    | `/health`                     | Liveness probe                           |
 | GET    | `/features`                   | Browse the catalog (filter by `tag`/`q`) |
 | GET    | `/features/{name}`            | Full manifest + status for one feature   |

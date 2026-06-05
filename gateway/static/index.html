@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Features — Marketplace</title>
+  <style>
+    :root {
+      --bg: #0d1117; --panel: #161b22; --panel-2: #1c2330; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --accent: #2f81f7; --accent-2: #3fb950;
+      --warn: #d29922; --danger: #f85149; --chip: #21262d;
+      --official: #2f81f7; --verified: #3fb950; --community: #8b949e;
+    }
+    [data-theme="light"] {
+      --bg: #f6f8fa; --panel: #fff; --panel-2: #f0f3f6; --border: #d0d7de;
+      --text: #1f2328; --muted: #636c76; --chip: #eaeef2;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    header {
+      display: flex; align-items: center; gap: 16px; padding: 14px 20px;
+      border-bottom: 1px solid var(--border); background: var(--panel); position: sticky; top: 0; z-index: 5;
+    }
+    header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+    header h1 span { color: var(--accent); }
+    .health { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+    .dot.ok { background: var(--accent-2); box-shadow: 0 0 6px var(--accent-2); }
+    .dot.bad { background: var(--danger); }
+    .spacer { flex: 1; }
+    input, textarea, select, button {
+      font: inherit; color: var(--text); background: var(--panel-2);
+      border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
+    }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+    button { cursor: pointer; background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+    button.ghost { background: var(--panel-2); color: var(--text); border-color: var(--border); font-weight: 400; }
+    button:hover { filter: brightness(1.08); }
+    .stats { display: flex; gap: 10px; padding: 14px 20px 0; flex-wrap: wrap; }
+    .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; min-width: 110px; }
+    .stat .n { font-size: 22px; font-weight: 600; }
+    .stat .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px 20px 28px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; display: flex; flex-direction: column; min-height: 180px; }
+    .panel > h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted);
+      margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+    .panel > h2 .count { background: var(--chip); color: var(--muted); border-radius: 10px; padding: 1px 8px; font-size: 11px; }
+    .panel .body { padding: 10px 12px; overflow: auto; max-height: 360px; }
+    .card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; background: var(--panel-2); cursor: pointer; transition: border-color .12s; }
+    .card:hover { border-color: var(--accent); }
+    .card.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+    .card .row { display: flex; align-items: center; gap: 8px; }
+    .card .title { font-weight: 600; }
+    .card .desc { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+    .chip { background: var(--chip); border-radius: 10px; padding: 1px 8px; font-size: 11px; color: var(--muted); }
+    .badge { border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: 600; color: #fff; }
+    .badge.official { background: var(--official); }
+    .badge.verified { background: var(--verified); }
+    .badge.community { background: var(--community); }
+    .tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .rankrow { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 8px 4px; border-bottom: 1px solid var(--border); }
+    .rankrow:last-child { border-bottom: 0; }
+    .rankrow .who { font-weight: 600; }
+    .rankrow .meta { color: var(--muted); font-size: 12px; }
+    .bar { grid-column: 1 / -1; height: 5px; background: var(--chip); border-radius: 3px; overflow: hidden; }
+    .bar > i { display: block; height: 100%; background: var(--accent); }
+    .scorepill { font-variant-numeric: tabular-nums; color: var(--accent-2); font-weight: 600; }
+    .empty { color: var(--muted); padding: 24px 8px; text-align: center; font-size: 13px; }
+    .invoke { grid-column: 1 / -1; }
+    .invoke .body { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-height: none; }
+    @media (max-width: 700px) { .invoke .body { grid-template-columns: 1fr; } }
+    .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; }
+    .field label { font-size: 12px; color: var(--muted); }
+    textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+    pre { margin: 0; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow: auto; font-size: 12.5px; min-height: 120px; }
+    pre.err { border-color: var(--danger); color: var(--danger); }
+    .latency { color: var(--muted); font-size: 12px; margin-top: 6px; }
+    a.link { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Agent <span>Features</span> · Marketplace</h1>
+    <span class="health"><span id="dot" class="dot"></span><span id="ver">connecting…</span></span>
+    <div class="spacer"></div>
+    <input id="search" placeholder="Search features &amp; capabilities…" style="width: 260px" />
+    <button class="ghost" id="refresh">Refresh</button>
+    <button class="ghost" id="theme" title="Toggle theme">◐</button>
+    <a class="link" href="/docs" title="REST API docs" target="_blank">API ↗</a>
+  </header>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Capabilities <span class="count" id="capCount">0</span></h2>
+      <div class="body" id="caps"><div class="empty">Loading…</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Live ranking <span class="count" id="rankFor">—</span></h2>
+      <div class="body" id="rank"><div class="empty">Select a capability to see how the marketplace ranks its vendors.</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Features <span class="count" id="featCount">0</span></h2>
+      <div class="body" id="feats"><div class="empty">Loading…</div></div>
+    </section>
+
+    <section class="panel invoke">
+      <h2>Invoke console</h2>
+      <div class="body">
+        <div>
+          <div class="field">
+            <label for="invFeature">Feature</label>
+            <select id="invFeature"></select>
+          </div>
+          <div class="field">
+            <label for="invInput">Input (JSON)</label>
+            <textarea id="invInput" spellcheck="false">{}</textarea>
+          </div>
+          <button id="invRun">Run ▸</button>
+        </div>
+        <div>
+          <div class="field">
+            <label>Output</label>
+            <pre id="invOut">—</pre>
+          </div>
+          <div class="latency" id="invLatency"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let FEATURES = [];      // [{manifest, phase, endpoint}]
+let CAPS = [];          // [{capability, description, provider_count, vendors, preferred}]
+let selectedCap = null;
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    let detail; try { detail = (await r.json()).detail; } catch { detail = r.statusText; }
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  return r.json();
+}
+
+function badge(trust) { return `<span class="badge ${trust}">${trust}</span>`; }
+
+// Build a minimal example object from a JSON Schema so the console is pre-filled.
+function exampleFromSchema(schema) {
+  if (!schema || schema.type !== "object" || !schema.properties) return {};
+  const out = {};
+  for (const [k, p] of Object.entries(schema.properties)) {
+    if (p.example !== undefined) out[k] = p.example;
+    else if (p.default !== undefined) out[k] = p.default;
+    else if (p.type === "number" || p.type === "integer") out[k] = 0;
+    else if (p.type === "boolean") out[k] = false;
+    else if (p.type === "array") out[k] = [];
+    else if (p.type === "object") out[k] = {};
+    else out[k] = "";
+  }
+  return out;
+}
+
+function renderStats() {
+  const vendors = new Set(FEATURES.map(f => f.manifest.vendor));
+  $("stats").innerHTML = [
+    ["Capabilities", CAPS.length],
+    ["Features", FEATURES.length],
+    ["Vendors", vendors.size],
+  ].map(([l, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+}
+
+function renderCaps(filter) {
+  const list = CAPS.filter(c => match(filter, c.capability, c.description, (c.vendors||[]).join(" ")));
+  $("capCount").textContent = list.length;
+  $("caps").innerHTML = list.length ? list.map(c => `
+    <div class="card ${c.capability === selectedCap ? "sel" : ""}" data-cap="${esc(c.capability)}">
+      <div class="row"><span class="title">${esc(c.capability)}</span>
+        <span class="chip">${c.provider_count} provider${c.provider_count === 1 ? "" : "s"}</span></div>
+      ${c.description ? `<div class="desc">${esc(c.description)}</div>` : ""}
+      <div class="tags">${(c.vendors||[]).map(v => `<span class="chip">${esc(v)}</span>`).join("")}
+        ${c.preferred ? `<span class="chip">★ ${esc(c.preferred)}</span>` : ""}</div>
+    </div>`).join("") : `<div class="empty">No capabilities match.</div>`;
+  for (const el of $("caps").querySelectorAll(".card")) {
+    el.onclick = () => selectCap(el.dataset.cap);
+  }
+}
+
+function renderFeats(filter) {
+  const list = FEATURES.filter(f => {
+    const m = f.manifest;
+    return match(filter, m.name, m.description, m.vendor, m.capability, (m.tags||[]).join(" "));
+  });
+  $("featCount").textContent = list.length;
+  $("feats").innerHTML = list.length ? list.map(f => {
+    const m = f.manifest;
+    return `<div class="card" data-feat="${esc(m.name)}">
+      <div class="row"><span class="title">${esc(m.name)}</span>${badge(m.trust)}
+        <span class="chip">v${esc(m.version)}</span><span class="spacer"></span>
+        <span class="chip">${esc(m.capability)}</span></div>
+      ${m.description ? `<div class="desc">${esc(m.description)}</div>` : ""}
+      <div class="tags"><span class="chip">${esc(m.vendor)}</span>
+        ${(m.tags||[]).map(t => `<span class="chip">#${esc(t)}</span>`).join("")}</div>
+    </div>`;
+  }).join("") : `<div class="empty">No features match.</div>`;
+  for (const el of $("feats").querySelectorAll(".card")) {
+    el.onclick = () => { $("invFeature").value = el.dataset.feat; onFeaturePick(); };
+  }
+}
+
+async function selectCap(cap) {
+  selectedCap = cap;
+  renderCaps($("search").value);
+  $("rankFor").textContent = cap;
+  $("rank").innerHTML = `<div class="empty">Loading ranking…</div>`;
+  try {
+    const scores = await api(`/capabilities/${encodeURIComponent(cap)}/ranking`);
+    const max = Math.max(...scores.map(s => s.score), 0.0001);
+    $("rank").innerHTML = scores.map((s, i) => `
+      <div class="rankrow">
+        <div><span class="who">${i === 0 ? "★ " : ""}${esc(s.vendor)}</span>
+          <span class="chip">v${esc(s.version)}</span></div>
+        <div class="scorepill">${s.score.toFixed(3)}</div>
+        <div class="bar"><i style="width:${(s.score / max * 100).toFixed(1)}%"></i></div>
+        <div class="meta" style="grid-column:1/-1">
+          ${s.invocations} call${s.invocations === 1 ? "" : "s"}
+          · success ${s.success_rate == null ? "—" : (s.success_rate * 100).toFixed(0) + "%"}
+          · avg ${s.avg_latency_ms == null ? "—" : s.avg_latency_ms.toFixed(1) + " ms"}
+        </div>
+      </div>`).join("");
+  } catch (e) {
+    $("rank").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+function onFeaturePick() {
+  const f = FEATURES.find(f => f.manifest.name === $("invFeature").value);
+  if (f) $("invInput").value = JSON.stringify(exampleFromSchema(f.manifest.input_schema), null, 2);
+}
+
+async function runInvoke() {
+  const name = $("invFeature").value;
+  $("invOut").className = ""; $("invOut").textContent = "Running…"; $("invLatency").textContent = "";
+  let input;
+  try { input = JSON.parse($("invInput").value || "{}"); }
+  catch (e) { $("invOut").className = "err"; $("invOut").textContent = "Invalid JSON: " + e.message; return; }
+  try {
+    const res = await api(`/features/${encodeURIComponent(name)}/invoke`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input }),
+    });
+    $("invOut").textContent = JSON.stringify(res.output, null, 2);
+    $("invLatency").textContent = `${res.vendor} · v${res.version} · ${res.latency_ms.toFixed(1)} ms`;
+    if (selectedCap) selectCap(selectedCap);   // refresh ranking with the new metric
+  } catch (e) {
+    $("invOut").className = "err"; $("invOut").textContent = e.message;
+  }
+}
+
+function fillFeatureSelect() {
+  $("invFeature").innerHTML = FEATURES.map(f =>
+    `<option value="${esc(f.manifest.name)}">${esc(f.manifest.name)} — ${esc(f.manifest.vendor)}</option>`).join("");
+  onFeaturePick();
+}
+
+const match = (q, ...fields) => !q || fields.some(f => (f || "").toLowerCase().includes(q.toLowerCase()));
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function loadAll() {
+  try {
+    const info = await api("/health");
+    $("dot").className = "dot ok";
+    const root = await api("/"); $("ver").textContent = "gateway v" + root.version;
+  } catch { $("dot").className = "dot bad"; $("ver").textContent = "gateway unreachable"; }
+  try {
+    [FEATURES, CAPS] = await Promise.all([api("/features"), api("/capabilities")]);
+    renderStats(); renderCaps($("search").value); renderFeats($("search").value); fillFeatureSelect();
+  } catch (e) {
+    $("caps").innerHTML = $("feats").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+$("search").oninput = (e) => { renderCaps(e.target.value); renderFeats(e.target.value); };
+$("refresh").onclick = loadAll;
+$("invRun").onclick = runInvoke;
+$("invFeature").onchange = onFeaturePick;
+$("theme").onclick = () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next; localStorage.setItem("af-theme", next);
+};
+document.documentElement.dataset.theme = localStorage.getItem("af-theme") || "dark";
+loadAll();
+</script>
+</body>
+</html>
