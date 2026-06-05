@@ -49,6 +49,7 @@ open http://127.0.0.1:8000/docs        # interactive REST docs
 | GET    | `/capabilities`               | Canonical capabilities + their ranked vendors |
 | GET    | `/capabilities/{cap}`         | All providers of a capability, best-first |
 | POST   | `/capabilities/{cap}/invoke`  | Resolve the best provider and invoke (pin with `?vendor=`/`?version=`) |
+| GET    | `/capabilities/{cap}/ranking` | Live vendor ranking with scores & metrics |
 | POST   | `/mcp`                        | MCP (JSON-RPC): `initialize`, `tools/list`, `tools/call` |
 
 ### Browse and invoke (REST)
@@ -101,11 +102,20 @@ curl -X POST "http://127.0.0.1:8000/capabilities/greet/invoke?version=^1.2.0" ..
 (`~1.2`), comparators (`>=1.2.0`, `<2.0.0`), or `latest`/`*`. Among satisfying
 providers the marketplace still applies ranking (below).
 
-**Ranking** (baseline) orders providers by trust tier → newest version → vendor.
-A richer engine (success rate, latency, cost — fed by the observability layer)
-plugs into `rank_features` in `gateway/catalog.py`. The `greet` capability ships
-with two demo vendors (`acme`, verified; `globex`, community) to show
-resolution and pinning.
+**Ranking** is pluggable (`gateway/ranking.py`). The default `MetricsPolicy`
+*learns*: every invocation records success/latency, and providers are scored by
+observed `success_rate − latency_penalty + trust_prior`, with an optimistic
+cold start so new vendors aren't starved. Set `AGENT_FEATURES_RANKING=baseline`
+for the static trust→version order instead.
+
+```bash
+curl http://127.0.0.1:8000/capabilities/greet/ranking   # live scores + metrics
+```
+
+A vendor that actually performs overtakes a more-trusted one that doesn't — a
+10%+ success-rate gap overrides the trust prior. The `greet` capability ships
+two demo vendors (`acme`, verified; `globex`, community) to show resolution,
+pinning, and ranking.
 
 ## Sample (dev) features
 

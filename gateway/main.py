@@ -20,9 +20,16 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 
 from . import __version__, mcp
-from .catalog import Catalog, rank_features
+from .catalog import Catalog, feature_id, match_version
 from .invoker import FeatureInputError, FeatureUnavailable, Invoker
-from .models import CapabilitySummary, Feature, InvokeRequest, InvokeResponse
+from .models import (
+    CapabilitySummary,
+    Feature,
+    InvokeRequest,
+    InvokeResponse,
+    ProviderScore,
+)
+from .ranking import BaselinePolicy, MetricsPolicy, MetricsStore, RankingPolicy
 from .samples import build_dev_catalog_and_invoker
 from .validation import ValidationError, validate
 
@@ -63,6 +70,25 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
     app.state.catalog = catalog
     app.state.invoker = invoker
 
+    # Ranking: record outcomes and let a policy order vendors. MetricsPolicy
+    # learns from observed success/latency; baseline is the static fallback.
+    store = MetricsStore()
+    policy: RankingPolicy = (
+        BaselinePolicy()
+        if os.getenv("AGENT_FEATURES_RANKING") == "baseline"
+        else MetricsPolicy()
+    )
+    app.state.metrics = store
+    app.state.ranking = policy
+
+    def _providers(capability: str, vendor: str | None = None, version: str | None = None):
+        out = [f for f in catalog.list() if f.manifest.capability == capability]
+        if vendor:
+            out = [f for f in out if f.manifest.vendor == vendor]
+        if version:
+            out = [f for f in out if match_version(f.manifest.version, version)]
+        return out
+
     @app.get("/")
     def info() -> dict[str, Any]:
         return {
@@ -89,21 +115,24 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
 
     async def _invoke(feature: Feature, body: InvokeRequest) -> InvokeResponse:
         name = feature.manifest.name
+        fid = feature_id(feature)
         try:
             validate(body.input, feature.manifest.input_schema)
         except ValidationError as exc:
+            # Caller error — not a reflection of feature quality; not recorded.
             raise HTTPException(status_code=422, detail=exc.errors) from exc
         try:
             result = await invoker.invoke(name, body.input, body.context)
         except FeatureInputError as exc:
-            # The feature's own message about bad input is safe to return.
+            # Caller error too — surface it, but don't penalise the feature.
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except FeatureUnavailable as exc:
-            # Log the cause; return a generic message so no internal detail leaks.
+            store.record(fid, success=False)
             logger.warning("feature %s unavailable: %s", name, exc)
             raise HTTPException(
                 status_code=503, detail=f"feature '{name}' is currently unavailable"
             ) from exc
+        store.record(fid, success=True, latency_ms=result.latency_ms)
         return InvokeResponse(
             feature=name,
             version=feature.manifest.version,
@@ -125,13 +154,33 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
 
     @app.get("/capabilities/{capability}", response_model=list[Feature])
     def get_capability(capability: str) -> list[Feature]:
-        # All providers of the capability, best-first.
-        providers = rank_features(
-            [f for f in catalog.list() if f.manifest.capability == capability]
-        )
+        # All providers of the capability, best-first per the active policy.
+        providers = _providers(capability)
         if not providers:
             raise HTTPException(status_code=404, detail=f"unknown capability: {capability}")
-        return providers
+        return policy.rank(providers, store)
+
+    @app.get("/capabilities/{capability}/ranking", response_model=list[ProviderScore])
+    def capability_ranking(capability: str) -> list[ProviderScore]:
+        # The live ranking with the scores and metrics behind it.
+        providers = _providers(capability)
+        if not providers:
+            raise HTTPException(status_code=404, detail=f"unknown capability: {capability}")
+        scored = []
+        for f in policy.rank(providers, store):
+            m = store.get(feature_id(f))
+            scored.append(
+                ProviderScore(
+                    feature_id=feature_id(f),
+                    vendor=f.manifest.vendor,
+                    version=f.manifest.version,
+                    score=round(policy.score(f, store), 4),
+                    invocations=m.invocations if m else 0,
+                    success_rate=m.success_rate if m else None,
+                    avg_latency_ms=round(m.avg_latency_ms, 3) if m and m.avg_latency_ms else None,
+                )
+            )
+        return scored
 
     @app.post("/capabilities/{capability}/invoke", response_model=InvokeResponse)
     async def invoke_capability(
@@ -140,16 +189,18 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
         vendor: str | None = None,
         version: str | None = None,
     ) -> InvokeResponse:
-        # The marketplace picks the best provider (or honours a vendor/version pin).
-        feature = catalog.resolve(capability, version=version, vendor=vendor)
-        if feature is None:
+        # The marketplace ranks providers (honouring vendor/version pins) and
+        # invokes the top one.
+        providers = _providers(capability, vendor=vendor, version=version)
+        ranked = policy.rank(providers, store)
+        if not ranked:
             raise HTTPException(
                 status_code=404,
                 detail=f"no provider for capability '{capability}'"
                 + (f" (vendor={vendor})" if vendor else "")
                 + (f" (version={version})" if version else ""),
             )
-        return await _invoke(feature, body)
+        return await _invoke(ranked[0], body)
 
     @app.post("/mcp")
     async def mcp_endpoint(request: Request) -> dict[str, Any] | None:

@@ -109,3 +109,15 @@ class CapabilitySummary(BaseModel):
     vendors: list[str] = Field(default_factory=list)
     # The provider the marketplace would pick by default, as "vendor/name@version".
     preferred: str | None = None
+
+
+class ProviderScore(BaseModel):
+    """A provider's live ranking score and the metrics behind it."""
+
+    feature_id: str
+    vendor: str
+    version: str
+    score: float
+    invocations: int = 0
+    success_rate: float | None = None
+    avg_latency_ms: float | None = None
