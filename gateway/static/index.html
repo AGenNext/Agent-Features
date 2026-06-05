@@ -170,6 +170,33 @@
         <div id="evalResults" style="margin-top: 8px"></div>
       </div>
     </section>
+
+    <section class="panel invoke">
+      <h2>Component generator <span class="count">scaffold + schema.org</span></h2>
+      <div class="body">
+        <div>
+          <div class="field"><label for="genName">Name</label><input id="genName" placeholder="sentiment" /></div>
+          <div class="field"><label for="genCap">Capability</label><input id="genCap" placeholder="sentiment" /></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="field"><label for="genVendor">Vendor</label><input id="genVendor" value="community" /></div>
+            <div class="field"><label for="genVer">Version</label><input id="genVer" value="1.0.0" /></div>
+          </div>
+          <div class="field"><label for="genDesc">Description</label><input id="genDesc" placeholder="Classify the sentiment of text." /></div>
+          <div class="field"><label for="genTags">Tags (comma-separated)</label><input id="genTags" placeholder="nlp, text" /></div>
+          <div class="field"><label for="genIn">Input schema (JSON)</label><textarea id="genIn" spellcheck="false"></textarea></div>
+          <div class="field"><label for="genOut">Output schema (JSON)</label><textarea id="genOut" spellcheck="false"></textarea></div>
+          <button id="genRun">Generate ▸</button>
+        </div>
+        <div>
+          <div class="field"><label>Artifacts</label><div class="tags" id="genTabs"></div></div>
+          <pre id="genOutput">Fill the form and Generate to scaffold a feature — manifest, a LocalInvoker handler, and a schema.org JSON-LD descriptor.</pre>
+          <div class="tags" style="margin-top:8px">
+            <button class="ghost" id="genCopy">Copy</button>
+            <button class="ghost" id="genDownload">Download</button>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 
 <script>
@@ -398,6 +425,104 @@ async function runEvaluator() {
   if (selectedCap) selectCap(selectedCap);   // metrics moved — refresh ranking
 }
 
+// --- Component generator: scaffold a feature + schema.org descriptor --------
+let GEN_ARTIFACTS = {}, genActive = null;
+
+function pyManifest(m) {
+  const tags = (m.tags || []).map(t => JSON.stringify(t)).join(", ");
+  const ind = (o) => JSON.stringify(o, null, 4).split("\n").join("\n        ");
+  return `"""Feature: ${m.name} — generated scaffold (dev / LocalInvoker)."""
+from typing import Any
+
+from gateway.catalog import InMemoryCatalog
+from gateway.invoker import FeatureInputError, Handler, LocalInvoker
+from gateway.models import Manifest, TrustTier
+
+
+def ${m.fn}(payload: dict[str, Any]) -> dict[str, Any]:
+    # TODO: implement. 'payload' is already validated against input_schema.
+    raise FeatureInputError("not implemented")
+
+
+MANIFEST = Manifest(
+    name=${JSON.stringify(m.name)},
+    capability=${JSON.stringify(m.capability)},
+    vendor=${JSON.stringify(m.vendor)},
+    version=${JSON.stringify(m.version)},
+    description=${JSON.stringify(m.description)},
+    tags=[${tags}],
+    trust=TrustTier.${m.trust},
+    input_schema=${ind(m.input_schema)},
+    output_schema=${ind(m.output_schema)},
+)
+`;
+}
+
+function jsonManifest(m) {
+  return JSON.stringify({
+    name: m.name, capability: m.capability, vendor: m.vendor, version: m.version,
+    description: m.description, tags: m.tags, visibility: "public", protocol: "grpc",
+    trust: m.trust.toLowerCase(), input_schema: m.input_schema, output_schema: m.output_schema,
+  }, null, 2);
+}
+
+function jsonldManifest(m) {
+  // schema.org SoftwareApplication describing the feature as a callable action.
+  return JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: m.name, applicationCategory: "AgentFeature", softwareVersion: m.version,
+    description: m.description, keywords: (m.tags || []).join(", "),
+    author: { "@type": "Organization", name: m.vendor },
+    potentialAction: {
+      "@type": "Action",
+      name: m.capability,
+      target: { "@type": "EntryPoint", urlTemplate: `/features/${m.name}/invoke`, httpMethod: "POST" },
+    },
+  }, null, 2);
+}
+
+function generate() {
+  const name = $("genName").value.trim() || "feature";
+  let inSchema, outSchema;
+  try { inSchema = JSON.parse($("genIn").value || "{}"); outSchema = JSON.parse($("genOut").value || "{}"); }
+  catch (e) { $("genOutput").className = "err"; $("genOutput").textContent = "Invalid schema JSON: " + e.message; return; }
+  $("genOutput").className = "";
+  const m = {
+    name, fn: "_" + name.replace(/[^A-Za-z0-9_]/g, "_"),
+    capability: $("genCap").value.trim() || name,
+    vendor: $("genVendor").value.trim() || "community",
+    version: $("genVer").value.trim() || "1.0.0",
+    description: $("genDesc").value.trim(),
+    tags: $("genTags").value.split(",").map(s => s.trim()).filter(Boolean),
+    trust: "COMMUNITY",
+    input_schema: inSchema, output_schema: outSchema,
+  };
+  GEN_ARTIFACTS = {
+    [`${m.fn.slice(1)}.py`]: pyManifest(m),
+    "manifest.json": jsonManifest(m),
+    [`${name}.jsonld`]: jsonldManifest(m),
+  };
+  $("genTabs").innerHTML = Object.keys(GEN_ARTIFACTS).map((k, i) =>
+    `<span class="chip pick gentab" data-k="${esc(k)}">${esc(k)}</span>`).join("");
+  for (const el of $("genTabs").querySelectorAll(".gentab")) el.onclick = () => showArtifact(el.dataset.k);
+  showArtifact(Object.keys(GEN_ARTIFACTS)[0]);
+}
+
+function showArtifact(k) {
+  genActive = k;
+  $("genOutput").className = ""; $("genOutput").textContent = GEN_ARTIFACTS[k];
+  for (const el of $("genTabs").querySelectorAll(".gentab"))
+    el.style.borderColor = el.dataset.k === k ? "var(--accent)" : "";
+}
+
+function prefillGenerator() {
+  if (!$("genIn").value) $("genIn").value = JSON.stringify(
+    { type: "object", properties: { text: { type: "string" } }, required: ["text"] }, null, 2);
+  if (!$("genOut").value) $("genOut").value = JSON.stringify(
+    { type: "object", properties: { label: { type: "string" }, score: { type: "number" } } }, null, 2);
+}
+
 const match = (q, ...fields) => !q || fields.some(f => (f || "").toLowerCase().includes(q.toLowerCase()));
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -422,6 +547,15 @@ $("invRun").onclick = runInvoke;
 $("invFeature").onchange = onFeaturePick;
 $("evalRun").onclick = runEvaluator;
 $("evalFeature").onchange = onEvalPick;
+$("genRun").onclick = generate;
+$("genCopy").onclick = () => genActive && navigator.clipboard?.writeText(GEN_ARTIFACTS[genActive]);
+$("genDownload").onclick = () => {
+  if (!genActive) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([GEN_ARTIFACTS[genActive]], { type: "text/plain" }));
+  a.download = genActive; a.click(); URL.revokeObjectURL(a.href);
+};
+prefillGenerator();
 $("theme").onclick = () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next; localStorage.setItem("af-theme", next);

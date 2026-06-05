@@ -18,7 +18,7 @@ def test_ui_served_at_slash_ui():
     # Key panels are present in the single-file SPA.
     for marker in (
         "Agent Features", "Live ranking", "Invoke console", "Capabilities",
-        "Comparator", "Evaluator",
+        "Comparator", "Evaluator", "Component generator",
     ):
         assert marker in r.text
 
