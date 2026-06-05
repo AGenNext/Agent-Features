@@ -18,10 +18,20 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess  # noqa: S404 - used with a fixed argv, no shell
 import tempfile
 from typing import Any
+
+# A feature handle is a short token. Anything outside this set is rejected
+# before it can reach a filesystem path or a cosign argv — a barrier against
+# path traversal / command injection from the request-supplied name.
+_NAME_RE = re.compile(r"\A[A-Za-z0-9._-]{1,128}\Z")
+
+
+def is_safe_name(feature: str) -> bool:
+    return bool(_NAME_RE.match(feature)) and ".." not in feature
 
 # Where CI drops `<feature>.bundle` cosign bundles for the gateway to verify.
 SIGNATURES_DIR = os.getenv("SIGNATURES_DIR", "signatures")
@@ -76,9 +86,19 @@ def verify(feature: str, manifest: dict[str, Any]) -> dict[str, Any]:
         "digest": digest,
         "algorithm": "sha256",
         "issuer": SIGNING_OIDC_ISSUER,
-        "command": verify_command(feature),
     }
+    # Reject anything that isn't a plain feature handle *before* it reaches a
+    # path or an argv (path traversal / uncontrolled command line).
+    if not is_safe_name(feature):
+        return {**base, "command": "", "signed": False, "status": "unsigned",
+                "reason": "invalid feature name"}
+    base["command"] = verify_command(feature)
+
     bundle = _bundle_path(feature)
+    # Defence in depth: the resolved bundle must stay inside the signatures dir.
+    root = os.path.realpath(SIGNATURES_DIR)
+    if os.path.commonpath([root, os.path.realpath(bundle)]) != root:
+        return {**base, "signed": False, "status": "unsigned"}
     if not os.path.exists(bundle):
         return {**base, "signed": False, "status": "unsigned"}
     if not cosign_available():

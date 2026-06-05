@@ -35,3 +35,13 @@ def test_signature_endpoint_reports_unsigned_without_a_bundle(tmp_path, monkeypa
 
 def test_signature_endpoint_unknown_feature_404():
     assert client.get("/features/nope/signature").status_code == 404
+
+
+def test_unsafe_feature_name_is_rejected_before_touching_fs():
+    # A traversal / injection name never reaches a path or argv.
+    for bad in ["../../etc/passwd", "a/b", "name;rm -rf", "..", "a b"]:
+        assert signing.is_safe_name(bad) is False
+        res = signing.verify(bad, {"name": bad})
+        assert res["status"] == "unsigned"
+        assert res["command"] == ""
+    assert signing.is_safe_name("greet-acme") is True
