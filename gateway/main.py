@@ -21,6 +21,14 @@ from fastapi import FastAPI, HTTPException, Request
 
 from . import __version__, mcp
 from .catalog import Catalog, feature_id, match_version
+from .composer import (
+    Composer,
+    Composite,
+    CompositeResult,
+    CompositeSummary,
+    CompositionError,
+)
+from .composites import build_dev_composites
 from .invoker import FeatureInputError, FeatureUnavailable, Invoker
 from .models import (
     CapabilitySummary,
@@ -28,6 +36,7 @@ from .models import (
     InvokeRequest,
     InvokeResponse,
     ProviderScore,
+    RequestContext,
 )
 from .ranking import BaselinePolicy, MetricsPolicy, MetricsStore, RankingPolicy
 from .samples import build_dev_catalog_and_invoker
@@ -201,6 +210,78 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
                 + (f" (version={version})" if version else ""),
             )
         return await _invoke(ranked[0], body)
+
+    # --- composition: build an agent from registry capabilities --------------
+
+    async def _run_capability(
+        capability: str,
+        input_dict: dict[str, Any],
+        vendor: str | None = None,
+        version: str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve + invoke one capability for a composite; return its output."""
+        ranked = policy.rank(_providers(capability, vendor=vendor, version=version), store)
+        if not ranked:
+            raise CompositionError(f"no provider for capability '{capability}'")
+        feature = ranked[0]
+        fid = feature_id(feature)
+        try:
+            validate(input_dict, feature.manifest.input_schema)
+        except ValidationError as exc:
+            raise CompositionError(
+                f"step '{capability}' invalid input: {'; '.join(exc.errors)}"
+            ) from exc
+        try:
+            result = await invoker.invoke(feature.manifest.name, input_dict, RequestContext())
+        except FeatureInputError as exc:
+            raise CompositionError(f"step '{capability}': {exc}") from exc
+        except FeatureUnavailable as exc:
+            store.record(fid, success=False)
+            raise CompositionError(f"step '{capability}' is unavailable") from exc
+        store.record(fid, success=True, latency_ms=result.latency_ms)
+        return result.output
+
+    composer = Composer(_run_capability)
+    composites: dict[str, Composite] = {c.name: c for c in build_dev_composites()}
+
+    def _composite_summary(c: Composite) -> CompositeSummary:
+        return CompositeSummary(
+            name=c.name,
+            capability=c.capability,
+            description=c.description,
+            steps=[{"name": s.name, "capability": s.capability} for s in c.steps],
+        )
+
+    @app.get("/composites", response_model=list[CompositeSummary])
+    def list_composites() -> list[CompositeSummary]:
+        return [_composite_summary(c) for c in composites.values()]
+
+    @app.get("/composites/{name}", response_model=Composite)
+    def get_composite(name: str) -> Composite:
+        if name not in composites:
+            raise HTTPException(status_code=404, detail=f"unknown composite: {name}")
+        return composites[name]
+
+    @app.post("/compose", response_model=CompositeSummary, status_code=201)
+    def compose(spec: Composite) -> CompositeSummary:
+        # "Publish" a composition to the registry — a developer composing an
+        # agent from marketplace capabilities, like a compose file.
+        composites[spec.name] = spec
+        return _composite_summary(spec)
+
+    @app.post("/composites/{name}/invoke", response_model=CompositeResult)
+    async def invoke_composite(name: str, body: InvokeRequest) -> CompositeResult:
+        composite = composites.get(name)
+        if composite is None:
+            raise HTTPException(status_code=404, detail=f"unknown composite: {name}")
+        try:
+            validate(body.input, composite.input_schema)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=exc.errors) from exc
+        try:
+            return await composer.run(composite, body.input)
+        except CompositionError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.post("/mcp")
     async def mcp_endpoint(request: Request) -> dict[str, Any] | None:

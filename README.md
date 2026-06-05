@@ -50,6 +50,9 @@ open http://127.0.0.1:8000/docs        # interactive REST docs
 | GET    | `/capabilities/{cap}`         | All providers of a capability, best-first |
 | POST   | `/capabilities/{cap}/invoke`  | Resolve the best provider and invoke (pin with `?vendor=`/`?version=`) |
 | GET    | `/capabilities/{cap}/ranking` | Live vendor ranking with scores & metrics |
+| GET    | `/composites`                 | List composed agents (pipelines)         |
+| POST   | `/compose`                    | Publish a composite (Docker Hub–style)   |
+| POST   | `/composites/{name}/invoke`   | Run a composite; returns output + trace  |
 | POST   | `/mcp`                        | MCP (JSON-RPC): `initialize`, `tools/list`, `tools/call` |
 
 ### Browse and invoke (REST)
@@ -116,6 +119,29 @@ A vendor that actually performs overtakes a more-trusted one that doesn't — a
 10%+ success-rate gap overrides the trust prior. The `greet` capability ships
 two demo vendors (`acme`, verified; `globex`, community) to show resolution,
 pinning, and ranking.
+
+## Composing agents (Docker Hub–style)
+
+A developer assembles an agent the way they assemble a container app: pull
+capabilities from the **registry** (marketplace) and wire them in a **compose
+file**. A *composite* is a pipeline of steps, each invoking a capability —
+resolved, ranked, validated and traced like any call. Composites are themselves
+capabilities, so they compose recursively.
+
+```bash
+curl http://127.0.0.1:8000/composites
+curl -X POST http://127.0.0.1:8000/composites/greet-report/invoke \
+  -H 'content-type: application/json' -d '{"input":{"name":"Ada"}}'
+# -> {"composite":"greet-report","output":{"greeting":"...","characters":18,"words":4},"trace":[...]}
+```
+
+| Docker | Agent Features |
+|--------|----------------|
+| `image:tag` | a capability + version (resolved & ranked) |
+| `docker-compose.yml` | an agent compose file (`POST /compose`) |
+| `docker push` / `docker run` | publish (`/compose`) / run (`/composites/{name}/invoke`) |
+
+See [`examples/agents/`](examples/agents/) for an annotated compose file.
 
 ## Sample (dev) features
 
