@@ -18,7 +18,7 @@ from typing import Any
 from .catalog import Catalog
 from .invoker import FeatureInputError, FeatureUnavailable, Invoker
 from .models import RequestContext
-from .validation import ValidationError, validate
+from .validation import collect_errors
 
 logger = logging.getLogger(__name__)
 
@@ -77,14 +77,15 @@ async def _call(msg_id, params, catalog: Catalog, invoker: Invoker) -> dict[str,
     if feature is None:
         return _err(msg_id, INVALID_PARAMS, f"unknown tool: {name}")
 
+    # Validate first with a pure check: the messages are plain data about the
+    # caller's input vs the public schema (never read off an exception), so they
+    # are safe to return — no internal/stack-trace state can leak through them.
+    input_errors = collect_errors(arguments, feature.manifest.input_schema)
+    if input_errors:
+        return _tool_error(msg_id, "invalid input: " + "; ".join(input_errors))
+
     try:
-        validate(arguments, feature.manifest.input_schema)
         result = await invoker.invoke(name, arguments, RequestContext())
-    except ValidationError as exc:
-        # exc.errors are our own schema-violation messages about the caller's
-        # input — safe and useful to return. We avoid stringifying the
-        # exception itself so no internal detail leaks.
-        return _tool_error(msg_id, "invalid input: " + "; ".join(exc.errors))
     except FeatureInputError as exc:
         # Log the specifics; return a generic message. The exception string can
         # carry feature/transport internals (e.g. gRPC details), so we never

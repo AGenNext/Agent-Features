@@ -33,7 +33,7 @@ from .models import (
 )
 from .ranking import BaselinePolicy, MetricsPolicy, MetricsStore, RankingPolicy
 from .samples import build_dev_catalog_and_invoker
-from .validation import ValidationError, validate
+from .validation import collect_errors
 
 logger = logging.getLogger(__name__)
 
@@ -119,11 +119,12 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
     async def _invoke(feature: Feature, body: InvokeRequest) -> InvokeResponse:
         name = feature.manifest.name
         fid = feature_id(feature)
-        try:
-            validate(body.input, feature.manifest.input_schema)
-        except ValidationError as exc:
-            # Caller error — not a reflection of feature quality; not recorded.
-            raise HTTPException(status_code=422, detail=exc.errors) from exc
+        # Caller error — not a reflection of feature quality; not recorded. The
+        # detail is plain data from a pure check (never an exception), so it is
+        # safe to return.
+        input_errors = collect_errors(body.input, feature.manifest.input_schema)
+        if input_errors:
+            raise HTTPException(status_code=422, detail=input_errors)
         try:
             result = await invoker.invoke(name, body.input, body.context)
         except FeatureInputError as exc:
