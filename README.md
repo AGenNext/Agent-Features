@@ -37,6 +37,17 @@ uvicorn gateway.main:app --reload
 open http://127.0.0.1:8000/docs        # interactive REST docs
 ```
 
+Or run it in a container with Docker Compose (gateway in dev mode — the whole
+marketplace, no cluster):
+
+```bash
+docker compose up --build                            # gateway at :8000
+docker compose --profile observability up --build    # + HertzBeat monitoring
+```
+
+> The operator needs a Kubernetes API, so it's not in Compose — use the kind
+> path (`make e2e`) for the operator + gRPC feature pods.
+
 ## API
 
 | Method | Path                          | Purpose                                  |
