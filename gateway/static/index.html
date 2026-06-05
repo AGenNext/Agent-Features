@@ -80,6 +80,17 @@
     pre.err { border-color: var(--danger); color: var(--danger); }
     .latency { color: var(--muted); font-size: 12px; margin-top: 6px; }
     a.link { color: var(--accent); text-decoration: none; }
+    table.cmp { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+    table.cmp th, table.cmp td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
+    table.cmp th { color: var(--muted); font-weight: 600; background: var(--panel-2); }
+    table.cmp td .chip { margin-left: 4px; }
+    .pick { cursor: pointer; user-select: none; }
+    .pick input { margin-right: 4px; vertical-align: -1px; }
+    .evalrow { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: center; padding: 6px 2px; border-bottom: 1px solid var(--border); }
+    .evalrow:last-child { border-bottom: 0; }
+    .evalrow code { font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+    .good { color: var(--accent-2); font-weight: 700; }
+    .bad { color: var(--danger); font-weight: 700; }
   </style>
 </head>
 <body>
@@ -132,6 +143,31 @@
           </div>
           <div class="latency" id="invLatency"></div>
         </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Comparator <span class="count" id="cmpCount">0</span></h2>
+      <div class="body">
+        <div id="cmpPick" class="tags" style="margin-bottom: 10px"></div>
+        <div id="cmpTable"><div class="empty">Pick two or more features to compare side by side.</div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Evaluator</h2>
+      <div class="body">
+        <div class="field">
+          <label for="evalFeature">Feature</label>
+          <select id="evalFeature"></select>
+        </div>
+        <div class="field">
+          <label for="evalCases">Test inputs — a JSON array of input objects</label>
+          <textarea id="evalCases" spellcheck="false">[]</textarea>
+        </div>
+        <button id="evalRun">Run suite ▸</button>
+        <div class="latency" id="evalSummary"></div>
+        <div id="evalResults" style="margin-top: 8px"></div>
       </div>
     </section>
   </div>
@@ -265,10 +301,101 @@ async function runInvoke() {
   }
 }
 
-function fillFeatureSelect() {
-  $("invFeature").innerHTML = FEATURES.map(f =>
+function featureOptions() {
+  return FEATURES.map(f =>
     `<option value="${esc(f.manifest.name)}">${esc(f.manifest.name)} — ${esc(f.manifest.vendor)}</option>`).join("");
+}
+
+function fillFeatureSelect() {
+  $("invFeature").innerHTML = featureOptions();
+  $("evalFeature").innerHTML = featureOptions();
   onFeaturePick();
+  onEvalPick();
+}
+
+// --- Comparator: pick N features, diff their manifests side by side ---------
+function renderComparatorPicker() {
+  $("cmpPick").innerHTML = FEATURES.map(f =>
+    `<label class="chip pick"><input type="checkbox" value="${esc(f.manifest.name)}">${esc(f.manifest.name)}</label>`).join("");
+  for (const cb of $("cmpPick").querySelectorAll("input")) cb.onchange = renderComparison;
+  renderComparison();
+}
+
+function schemaFields(schema) {
+  if (!schema || !schema.properties) return "—";
+  const req = new Set(schema.required || []);
+  return Object.entries(schema.properties).map(([k, p]) =>
+    `${esc(k)}<span class="chip">${esc(p.type || "any")}${req.has(k) ? " *" : ""}</span>`).join("<br>");
+}
+
+function renderComparison() {
+  const picked = [...$("cmpPick").querySelectorAll("input:checked")].map(c => c.value);
+  $("cmpCount").textContent = picked.length;
+  if (picked.length < 2) {
+    $("cmpTable").innerHTML = `<div class="empty">Pick two or more features to compare side by side.</div>`;
+    return;
+  }
+  const feats = picked.map(n => FEATURES.find(f => f.manifest.name === n)).filter(Boolean);
+  const rows = [
+    ["Vendor", f => esc(f.manifest.vendor)],
+    ["Trust", f => badge(f.manifest.trust)],
+    ["Version", f => "v" + esc(f.manifest.version)],
+    ["Capability", f => esc(f.manifest.capability)],
+    ["Protocol", f => esc(f.manifest.protocol)],
+    ["Tags", f => (f.manifest.tags || []).map(t => "#" + esc(t)).join(" ") || "—"],
+    ["Inputs", f => schemaFields(f.manifest.input_schema)],
+    ["Outputs", f => schemaFields(f.manifest.output_schema)],
+    ["Phase", f => esc(f.phase)],
+  ];
+  let html = `<div style="overflow:auto"><table class="cmp"><tr><th></th>${
+    feats.map(f => `<th>${esc(f.manifest.name)}</th>`).join("")}</tr>`;
+  for (const [label, fn] of rows) {
+    html += `<tr><th>${label}</th>${feats.map(f => `<td>${fn(f)}</td>`).join("")}</tr>`;
+  }
+  $("cmpTable").innerHTML = html + `</table></div>`;
+}
+
+// --- Evaluator: run a suite of inputs against a feature, score the results --
+function onEvalPick() {
+  const f = FEATURES.find(f => f.manifest.name === $("evalFeature").value);
+  if (f) $("evalCases").value = JSON.stringify([exampleFromSchema(f.manifest.input_schema)], null, 2);
+}
+
+const avg = (a) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;
+
+async function runEvaluator() {
+  const name = $("evalFeature").value;
+  let cases;
+  try { cases = JSON.parse($("evalCases").value || "[]"); }
+  catch (e) { $("evalResults").innerHTML = `<div class="empty bad">Invalid JSON: ${esc(e.message)}</div>`; return; }
+  if (!Array.isArray(cases) || !cases.length) {
+    $("evalResults").innerHTML = `<div class="empty">Provide a non-empty JSON array of input objects.</div>`; return;
+  }
+  $("evalSummary").textContent = ""; $("evalResults").innerHTML = `<div class="empty">Running ${cases.length} case(s)…</div>`;
+  const results = [];
+  for (const input of cases) {
+    const t0 = performance.now();
+    try {
+      const res = await api(`/features/${encodeURIComponent(name)}/invoke`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ input }),
+      });
+      results.push({ ok: true, input, output: res.output, ms: res.latency_ms });
+    } catch (e) {
+      results.push({ ok: false, input, error: e.message, ms: performance.now() - t0 });
+    }
+  }
+  const lat = results.filter(r => r.ok).map(r => r.ms).sort((a, b) => a - b);
+  const p95 = lat.length ? lat[Math.min(lat.length - 1, Math.floor(lat.length * 0.95))] : 0;
+  const oks = results.filter(r => r.ok).length;
+  $("evalSummary").textContent =
+    `${oks}/${results.length} ok · success ${(oks / results.length * 100).toFixed(0)}% · avg ${avg(lat).toFixed(1)} ms · p95 ${p95.toFixed(1)} ms`;
+  $("evalResults").innerHTML = results.map(r => `
+    <div class="evalrow">
+      <span class="${r.ok ? "good" : "bad"}">${r.ok ? "✓" : "✗"}</span>
+      <code>${esc(JSON.stringify(r.input))} → ${esc(r.ok ? JSON.stringify(r.output) : r.error)}</code>
+      <span class="meta">${r.ms.toFixed(1)} ms</span>
+    </div>`).join("");
+  if (selectedCap) selectCap(selectedCap);   // metrics moved — refresh ranking
 }
 
 const match = (q, ...fields) => !q || fields.some(f => (f || "").toLowerCase().includes(q.toLowerCase()));
@@ -282,7 +409,8 @@ async function loadAll() {
   } catch { $("dot").className = "dot bad"; $("ver").textContent = "gateway unreachable"; }
   try {
     [FEATURES, CAPS] = await Promise.all([api("/features"), api("/capabilities")]);
-    renderStats(); renderCaps($("search").value); renderFeats($("search").value); fillFeatureSelect();
+    renderStats(); renderCaps($("search").value); renderFeats($("search").value);
+    fillFeatureSelect(); renderComparatorPicker();
   } catch (e) {
     $("caps").innerHTML = $("feats").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
@@ -292,6 +420,8 @@ $("search").oninput = (e) => { renderCaps(e.target.value); renderFeats(e.target.
 $("refresh").onclick = loadAll;
 $("invRun").onclick = runInvoke;
 $("invFeature").onchange = onFeaturePick;
+$("evalRun").onclick = runEvaluator;
+$("evalFeature").onchange = onEvalPick;
 $("theme").onclick = () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next; localStorage.setItem("af-theme", next);

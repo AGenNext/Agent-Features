@@ -16,7 +16,10 @@ def test_ui_served_at_slash_ui():
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
     # Key panels are present in the single-file SPA.
-    for marker in ("Agent Features", "Live ranking", "Invoke console", "Capabilities"):
+    for marker in (
+        "Agent Features", "Live ranking", "Invoke console", "Capabilities",
+        "Comparator", "Evaluator",
+    ):
         assert marker in r.text
 
 
