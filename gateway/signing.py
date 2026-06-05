@@ -56,22 +56,6 @@ def cosign_available() -> bool:
     return shutil.which("cosign") is not None
 
 
-def _bundle_path(feature: str) -> str:
-    return os.path.join(SIGNATURES_DIR, f"{feature}.bundle")
-
-
-def verify_command(feature: str) -> str:
-    """The exact cosign command a user can run to verify this feature."""
-
-    identity = SIGNING_IDENTITY or "<expected-identity>"
-    return (
-        "cosign verify-blob "
-        f"--bundle {_bundle_path(feature)} "
-        f"--certificate-identity {identity} "
-        f"--certificate-oidc-issuer {SIGNING_OIDC_ISSUER} <manifest.json>"
-    )
-
-
 def verify(feature: str, manifest: dict[str, Any]) -> dict[str, Any]:
     """Report the signature status of a feature manifest.
 
@@ -87,14 +71,23 @@ def verify(feature: str, manifest: dict[str, Any]) -> dict[str, Any]:
         "algorithm": "sha256",
         "issuer": SIGNING_OIDC_ISSUER,
     }
-    # Reject anything that isn't a plain feature handle *before* it reaches a
-    # path or an argv (path traversal / uncontrolled command line).
-    if not is_safe_name(feature):
+    # Allowlist the name with an inline regexp guard *before* it reaches any
+    # path or argv. Inlined (not via a helper) so static analysis sees the
+    # barrier directly on `feature` — defends path traversal + command
+    # injection from the request-supplied name.
+    if _NAME_RE.fullmatch(feature) is None or ".." in feature:
         return {**base, "command": "", "signed": False, "status": "unsigned",
                 "reason": "invalid feature name"}
-    base["command"] = verify_command(feature)
 
-    bundle = _bundle_path(feature)
+    # Build the path from the now-validated name only.
+    bundle = os.path.join(SIGNATURES_DIR, feature + ".bundle")
+    base["command"] = (
+        "cosign verify-blob "
+        f"--bundle {bundle} "
+        f"--certificate-identity {SIGNING_IDENTITY or '<expected-identity>'} "
+        f"--certificate-oidc-issuer {SIGNING_OIDC_ISSUER} <manifest.json>"
+    )
+
     # Defence in depth: the resolved bundle must stay inside the signatures dir.
     root = os.path.realpath(SIGNATURES_DIR)
     if os.path.commonpath([root, os.path.realpath(bundle)]) != root:
