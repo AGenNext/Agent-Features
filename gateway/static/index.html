@@ -100,9 +100,13 @@
     <div class="spacer"></div>
     <input id="search" placeholder="Search features &amp; capabilities…" style="width: 260px" />
     <button class="ghost" id="refresh">Refresh</button>
+    <button class="ghost" id="bell" title="Notifications" style="position:relative">🔔<span id="bellBadge" style="display:none;position:absolute;top:-7px;right:-7px;background:var(--danger);color:#fff;border-radius:10px;font-size:10px;padding:0 5px;line-height:16px">0</span></button>
     <button class="ghost" id="theme" title="Toggle theme">◐</button>
     <a class="link" href="/docs" title="REST API docs" target="_blank">API ↗</a>
   </header>
+
+  <div id="notifPanel" style="display:none;position:absolute;top:54px;right:20px;width:330px;max-height:380px;overflow:auto;background:var(--panel);border:1px solid var(--border);border-radius:10px;z-index:10;box-shadow:0 10px 28px rgba(0,0,0,.45)"></div>
+  <div id="toasts" style="position:fixed;bottom:18px;right:18px;display:flex;flex-direction:column;gap:8px;z-index:20"></div>
 
   <div class="stats" id="stats"></div>
 
@@ -322,9 +326,11 @@ async function runInvoke() {
     });
     $("invOut").textContent = JSON.stringify(res.output, null, 2);
     $("invLatency").textContent = `${res.vendor} · v${res.version} · ${res.latency_ms.toFixed(1)} ms`;
+    notify(`${name} → ${res.latency_ms.toFixed(1)} ms`, "success");
     if (selectedCap) selectCap(selectedCap);   // refresh ranking with the new metric
   } catch (e) {
     $("invOut").className = "err"; $("invOut").textContent = e.message;
+    notify(`${name} failed: ${e.message}`, "error");
   }
 }
 
@@ -422,6 +428,7 @@ async function runEvaluator() {
       <code>${esc(JSON.stringify(r.input))} → ${esc(r.ok ? JSON.stringify(r.output) : r.error)}</code>
       <span class="meta">${r.ms.toFixed(1)} ms</span>
     </div>`).join("");
+  notify(`Evaluated ${name}: ${oks}/${results.length} ok`, oks === results.length ? "success" : "error");
   if (selectedCap) selectCap(selectedCap);   // metrics moved — refresh ranking
 }
 
@@ -526,6 +533,28 @@ function prefillGenerator() {
 const match = (q, ...fields) => !q || fields.some(f => (f || "").toLowerCase().includes(q.toLowerCase()));
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+// --- Notifications: a client-side activity feed + toasts --------------------
+const NOTIFS = []; let unseen = 0;
+function notify(message, kind = "info") {
+  const n = { message, kind, t: new Date() };
+  NOTIFS.unshift(n); unseen++;
+  const b = $("bellBadge");
+  if (unseen > 0) { b.style.display = ""; b.textContent = unseen; }
+  if ($("notifPanel").style.display !== "none") renderNotifPanel();
+  const el = document.createElement("div");
+  const c = kind === "error" ? "var(--danger)" : kind === "success" ? "var(--accent-2)" : "var(--accent)";
+  el.style.cssText = `background:var(--panel-2);border:1px solid var(--border);border-left:3px solid ${c};border-radius:8px;padding:8px 12px;max-width:320px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.3)`;
+  el.textContent = message; $("toasts").appendChild(el);
+  setTimeout(() => { el.style.transition = "opacity .4s"; el.style.opacity = "0"; setTimeout(() => el.remove(), 400); }, 3500);
+}
+function renderNotifPanel() {
+  $("notifPanel").innerHTML = NOTIFS.length ? NOTIFS.slice(0, 50).map(n => `
+    <div style="padding:8px 12px;border-bottom:1px solid var(--border)">
+      <span class="${n.kind === "error" ? "bad" : n.kind === "success" ? "good" : ""}">${n.kind === "error" ? "✗" : n.kind === "success" ? "✓" : "•"}</span>
+      ${esc(n.message)}<div class="meta" style="font-size:11px">${n.t.toLocaleTimeString()}</div>
+    </div>`).join("") : `<div class="empty">No activity yet.</div>`;
+}
+
 async function loadAll() {
   try {
     const info = await api("/health");
@@ -556,6 +585,11 @@ $("genDownload").onclick = () => {
   a.download = genActive; a.click(); URL.revokeObjectURL(a.href);
 };
 prefillGenerator();
+$("bell").onclick = () => {
+  const p = $("notifPanel"), show = p.style.display === "none";
+  p.style.display = show ? "block" : "none";
+  if (show) { unseen = 0; $("bellBadge").style.display = "none"; renderNotifPanel(); }
+};
 $("theme").onclick = () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next; localStorage.setItem("af-theme", next);
