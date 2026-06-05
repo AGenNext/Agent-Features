@@ -175,6 +175,17 @@
       </div>
     </section>
 
+    <section class="panel">
+      <h2>Chat <span class="count">deterministic</span></h2>
+      <div class="body">
+        <div id="chatLog" style="max-height:260px;overflow:auto;margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px">
+          <input id="chatInput" placeholder='calculator {"expression":"2+2"} · or "help"' style="flex:1" />
+          <button id="chatSend">Send</button>
+        </div>
+      </div>
+    </section>
+
     <section class="panel invoke">
       <h2>Component generator <span class="count">scaffold + schema.org</span></h2>
       <div class="body">
@@ -558,6 +569,54 @@ function prefillGenerator() {
 const match = (q, ...fields) => !q || fields.some(f => (f || "").toLowerCase().includes(q.toLowerCase()));
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+// --- Chat: deterministic console streaming over SSE -------------------------
+function appendChat(role, text) {
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "margin-bottom:10px";
+  wrap.innerHTML = `<div class="meta" style="font-size:11px">${role === "user" ? "you" : "gateway"}</div>`;
+  const body = document.createElement("div");
+  if (text) body.textContent = text;
+  wrap.appendChild(body); $("chatLog").appendChild(wrap);
+  $("chatLog").scrollTop = $("chatLog").scrollHeight;
+  return body;
+}
+
+function handleChatEvent(e, el) {
+  if (e.type === "status") el.innerHTML += `<div class="meta">${esc(e.text)}</div>`;
+  else if (e.type === "error") { el.innerHTML += `<div class="bad">✗ ${esc(e.message)}</div>`; notify("chat: " + e.message, "error"); }
+  else if (e.type === "result") {
+    el.innerHTML += `<div class="good">✓ ${esc(e.vendor)}/${esc(e.feature)} · ${e.latency_ms.toFixed(1)} ms</div>` +
+      `<pre style="min-height:auto;margin-top:4px">${esc(JSON.stringify(e.output, null, 2))}</pre>`;
+    if (selectedCap) selectCap(selectedCap);
+  }
+  $("chatLog").scrollTop = $("chatLog").scrollHeight;
+}
+
+async function chatSend() {
+  const msg = $("chatInput").value.trim();
+  if (!msg) return;
+  appendChat("user", msg); $("chatInput").value = "";
+  const el = appendChat("gateway", "");
+  let res;
+  try {
+    res = await fetch("/chat/stream", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: msg }),
+    });
+  } catch (e) { handleChatEvent({ type: "error", message: e.message }, el); return; }
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+      if (chunk.startsWith("data: ")) { try { handleChatEvent(JSON.parse(chunk.slice(6)), el); } catch {} }
+    }
+  }
+}
+
 // --- Orchestrator / flow builder: compose capabilities into a pipeline ------
 let FLOW_STEPS = [];
 
@@ -715,6 +774,8 @@ $("genRun").onclick = generate;
 $("flowAddStep").onclick = () => { FLOW_STEPS.push({ name: "step" + (FLOW_STEPS.length + 1), capability: CAPS[0]?.capability || "", inputs: "{}" }); renderSteps(); };
 $("flowPublish").onclick = publishComposite;
 $("flowRun").onclick = runComposite;
+$("chatSend").onclick = chatSend;
+$("chatInput").onkeydown = e => { if (e.key === "Enter") chatSend(); };
 $("genCopy").onclick = () => genActive && navigator.clipboard?.writeText(GEN_ARTIFACTS[genActive]);
 $("genDownload").onclick = () => {
   if (!genActive) return;

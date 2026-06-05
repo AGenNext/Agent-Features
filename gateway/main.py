@@ -13,12 +13,13 @@ Kubernetes catalog + gRPC invoker without touching the routes below.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
-from typing import Any
+from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, mcp
@@ -287,6 +288,83 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
         if errors:
             raise HTTPException(status_code=422, detail=errors)
         return await composer.run(composite, body.input)
+
+    # --- chat: a deterministic, streaming console over the catalog -----------
+    # No LLM: a tiny command grammar resolves to a feature/capability call and
+    # the steps stream back as Server-Sent Events. Errors are generic, safe
+    # messages (specifics are logged), matching the rest of the gateway.
+
+    async def _chat(text: str) -> AsyncIterator[dict[str, Any]]:
+        text = text.strip()
+        if not text or text == "help":
+            for line in (
+                "Commands:",
+                "  <feature> {json}         invoke a feature",
+                "  cap:<capability> {json}  invoke the best-ranked provider",
+                "  list                     list available features",
+            ):
+                yield {"type": "status", "text": line}
+            return
+        if text == "list":
+            yield {"type": "status", "text": "features:"}
+            for f in catalog.list():
+                yield {"type": "status", "text": f"  {f.manifest.name} ({f.manifest.capability})"}
+            return
+
+        head, _, tail = text.partition(" ")
+        try:
+            payload = json.loads(tail) if tail.strip() else {}
+        except ValueError:
+            yield {"type": "error", "message": "the text after the command must be valid JSON"}
+            return
+
+        if head.startswith("cap:"):
+            capability = head[4:]
+            yield {"type": "status", "text": f"resolving capability '{capability}'…"}
+            ranked = policy.rank(_providers(capability), store)
+            if not ranked:
+                yield {"type": "error", "message": f"no provider for capability '{capability}'"}
+                return
+            feature = ranked[0]
+        else:
+            feature = catalog.get(head)
+            if feature is None:
+                yield {"type": "error", "message": f"unknown feature '{head}' (try 'list')"}
+                return
+
+        yield {"type": "status", "text": f"invoking {feature.manifest.vendor}/{feature.manifest.name}…"}
+        errors = collect_errors(payload, feature.manifest.input_schema)
+        if errors:
+            yield {"type": "error", "message": "invalid input: " + "; ".join(errors)}
+            return
+        fid = feature_id(feature)
+        try:
+            result = await invoker.invoke(feature.manifest.name, payload, RequestContext())
+        except FeatureInputError as exc:
+            logger.info("chat: feature %s rejected input: %s", feature.manifest.name, exc)
+            yield {"type": "error", "message": "the feature rejected the input"}
+            return
+        except FeatureUnavailable as exc:
+            store.record(fid, success=False)
+            logger.warning("chat: feature %s unavailable: %s", feature.manifest.name, exc)
+            yield {"type": "error", "message": "the feature is currently unavailable"}
+            return
+        store.record(fid, success=True, latency_ms=result.latency_ms)
+        yield {
+            "type": "result", "feature": feature.manifest.name, "vendor": feature.manifest.vendor,
+            "output": result.output, "latency_ms": result.latency_ms,
+        }
+
+    @app.post("/chat/stream")
+    async def chat_stream(request: Request) -> StreamingResponse:
+        body = await request.json()
+        text = str(body.get("message", ""))
+
+        async def sse() -> AsyncIterator[str]:
+            async for event in _chat(text):
+                yield f"data: {json.dumps(event)}\n\n"
+
+        return StreamingResponse(sse(), media_type="text/event-stream")
 
     @app.post("/mcp")
     async def mcp_endpoint(request: Request) -> dict[str, Any] | None:
