@@ -4,6 +4,12 @@
 # short-lived cert from Fulcio, signs each manifest's canonical digest, and
 # records it in the Rekor transparency log — no long-lived keys. The resulting
 # `<feature>.bundle` files are what gateway.signing verifies at runtime.
+#
+# NOTE: this org requires every `uses:` action to be pinned to a full-length
+# commit SHA (tag refs like `@v4` are rejected at startup). Before enabling
+# this workflow, replace each `@vN` below with the corresponding commit SHA,
+# e.g. `actions/checkout@<40-hex-sha>  # v4.2.2`. It is release/dispatch-only,
+# so it stays dormant until then.
 name: sign-features
 
 on:
