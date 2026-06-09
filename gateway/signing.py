@@ -18,20 +18,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import shutil
 import subprocess  # noqa: S404 - used with a fixed argv, no shell
 import tempfile
-from typing import Any
-
-# A feature handle is a short token. Anything outside this set is rejected
-# before it can reach a filesystem path or a cosign argv — a barrier against
-# path traversal / command injection from the request-supplied name.
-_NAME_RE = re.compile(r"\A[A-Za-z0-9._-]{1,128}\Z")
-
-
-def is_safe_name(feature: str) -> bool:
-    return bool(_NAME_RE.match(feature)) and ".." not in feature
+from typing import Any, Iterable
 
 # Where CI drops `<feature>.bundle` cosign bundles for the gateway to verify.
 SIGNATURES_DIR = os.getenv("SIGNATURES_DIR", "signatures")
@@ -56,12 +46,27 @@ def cosign_available() -> bool:
     return shutil.which("cosign") is not None
 
 
-def verify(feature: str, manifest: dict[str, Any]) -> dict[str, Any]:
+def resolve_bundle(name: str, known_names: Iterable[str]) -> str | None:
+    """Resolve the signature-bundle path for ``name``, or ``None`` if unknown.
+
+    ``name`` (which may be request-controlled) is used **only as a key** into an
+    allowlist of paths built from the trusted ``known_names``. The returned path
+    therefore never carries the request string into a filesystem/argv operation
+    — closing path-traversal and command-injection flows at the source rather
+    than relying on a guard that a static analyzer may not recognise.
+    """
+
+    allowed = {n: os.path.join(SIGNATURES_DIR, n + ".bundle") for n in known_names}
+    return allowed.get(name)
+
+
+def verify(feature: str, manifest: dict[str, Any], bundle: str | None) -> dict[str, Any]:
     """Report the signature status of a feature manifest.
 
-    Returns plain data (never raises to the caller): the digest, whether a
-    bundle exists, and a verification ``status`` of ``verified`` / ``failed`` /
-    ``unverified`` (cosign or bundle absent) / ``unsigned``.
+    ``bundle`` is a trusted path resolved via :func:`resolve_bundle` (or
+    ``None`` when the feature has no bundle / is unknown). Returns plain data
+    (never raises): the digest, whether a bundle exists, and a ``status`` of
+    ``verified`` / ``failed`` / ``unverified`` (cosign absent) / ``unsigned``.
     """
 
     digest = manifest_digest(manifest)
@@ -71,27 +76,15 @@ def verify(feature: str, manifest: dict[str, Any]) -> dict[str, Any]:
         "algorithm": "sha256",
         "issuer": SIGNING_OIDC_ISSUER,
     }
-    # Allowlist the name with an inline regexp guard *before* it reaches any
-    # path or argv. Inlined (not via a helper) so static analysis sees the
-    # barrier directly on `feature` — defends path traversal + command
-    # injection from the request-supplied name.
-    if _NAME_RE.fullmatch(feature) is None or ".." in feature:
-        return {**base, "command": "", "signed": False, "status": "unsigned",
-                "reason": "invalid feature name"}
+    if not bundle:
+        return {**base, "command": "", "signed": False, "status": "unsigned"}
 
-    # Build the path from the now-validated name only.
-    bundle = os.path.join(SIGNATURES_DIR, feature + ".bundle")
     base["command"] = (
         "cosign verify-blob "
         f"--bundle {bundle} "
         f"--certificate-identity {SIGNING_IDENTITY or '<expected-identity>'} "
         f"--certificate-oidc-issuer {SIGNING_OIDC_ISSUER} <manifest.json>"
     )
-
-    # Defence in depth: the resolved bundle must stay inside the signatures dir.
-    root = os.path.realpath(SIGNATURES_DIR)
-    if os.path.commonpath([root, os.path.realpath(bundle)]) != root:
-        return {**base, "signed": False, "status": "unsigned"}
     if not os.path.exists(bundle):
         return {**base, "signed": False, "status": "unsigned"}
     if not cosign_available():
@@ -115,3 +108,4 @@ def verify(feature: str, manifest: dict[str, Any]) -> dict[str, Any]:
 
     ok = proc.returncode == 0
     return {**base, "signed": True, "status": "verified" if ok else "failed"}
+

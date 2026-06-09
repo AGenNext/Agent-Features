@@ -127,7 +127,13 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
         feature = catalog.get(name)
         if feature is None:
             raise HTTPException(status_code=404, detail=f"unknown feature: {name}")
-        return signing.verify(name, feature.manifest.model_dump(mode="json"))
+        # Resolve the bundle path through the trusted catalog name list — the
+        # request string only ever indexes an allowlist, so it never reaches a
+        # filesystem path or the cosign argv.
+        known = [f.manifest.name for f in catalog.list()]
+        bundle = signing.resolve_bundle(feature.manifest.name, known)
+        manifest = feature.manifest.model_dump(mode="json")
+        return signing.verify(feature.manifest.name, manifest, bundle)
 
     async def _invoke(feature: Feature, body: InvokeRequest) -> InvokeResponse:
         name = feature.manifest.name

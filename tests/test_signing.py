@@ -37,11 +37,18 @@ def test_signature_endpoint_unknown_feature_404():
     assert client.get("/features/nope/signature").status_code == 404
 
 
-def test_unsafe_feature_name_is_rejected_before_touching_fs():
-    # A traversal / injection name never reaches a path or argv.
-    for bad in ["../../etc/passwd", "a/b", "name;rm -rf", "..", "a b"]:
-        assert signing.is_safe_name(bad) is False
-        res = signing.verify(bad, {"name": bad})
-        assert res["status"] == "unsigned"
-        assert res["command"] == ""
-    assert signing.is_safe_name("greet-acme") is True
+def test_resolve_bundle_only_matches_known_names():
+    # The request string is used solely as a key into an allowlist built from
+    # trusted names, so traversal / injection inputs resolve to nothing and
+    # never reach a path or argv.
+    known = ["calculator", "greet-acme"]
+    assert signing.resolve_bundle("calculator", known).endswith("calculator.bundle")
+    for bad in ["../../etc/passwd", "a/b", "name;rm -rf", "..", "unknown"]:
+        assert signing.resolve_bundle(bad, known) is None
+
+
+def test_verify_without_bundle_is_unsigned():
+    res = signing.verify("calculator", {"name": "calculator"}, None)
+    assert res["status"] == "unsigned"
+    assert res["signed"] is False
+    assert res["command"] == ""
