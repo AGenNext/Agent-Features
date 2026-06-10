@@ -67,6 +67,7 @@ docker compose --profile observability up --build    # + HertzBeat monitoring
 | GET    | `/features`                   | Browse the catalog (filter by `tag`/`q`) |
 | GET    | `/features/{name}`            | Full manifest + status for one feature   |
 | GET    | `/features/{name}/signature`  | Manifest digest + Sigstore/cosign status |
+| POST   | `/agents/compile`             | Compile agent.next DSL → composite + 6-language client stubs |
 | POST   | `/features/{name}/invoke`     | Run a feature with validated inputs      |
 | GET    | `/capabilities`               | Canonical capabilities + their ranked vendors |
 | GET    | `/capabilities/{cap}`         | All providers of a capability, best-first |

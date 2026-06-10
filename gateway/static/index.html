@@ -246,6 +246,34 @@
         </div>
       </div>
     </section>
+
+    <section class="panel invoke">
+      <h2>Agent DSL <span class="count">agent.next → 6 langs</span></h2>
+      <div class="body">
+        <div>
+          <div class="field"><label for="dslSource">Declare an agent (<code>*.agent.next</code>)</label>
+            <textarea id="dslSource" spellcheck="false" style="min-height:220px;font-family:var(--mono)"></textarea></div>
+          <div class="tags">
+            <button id="dslCompile">Compile ▸</button>
+            <button class="ghost" id="dslPublish">Publish &amp; open in builder</button>
+          </div>
+          <div class="field" style="margin-top:8px"><label>Flow</label><div id="dslDiagram" class="tags"></div></div>
+        </div>
+        <div>
+          <div class="field"><label for="dslLang">Generated client</label>
+            <select id="dslLang">
+              <option value="ts">TypeScript</option>
+              <option value="js">JavaScript</option>
+              <option value="go">Go</option>
+              <option value="rust">Rust</option>
+              <option value="java">Java</option>
+              <option value="proto">Protobuf</option>
+            </select></div>
+          <pre id="dslCode" style="min-height:230px">Write an agent on the left, then Compile to generate client stubs.</pre>
+          <div class="tags"><button class="ghost" id="dslCopy">Copy</button><button class="ghost" id="dslDownload">Download</button></div>
+        </div>
+      </div>
+    </section>
   </div>
 
 <script>
@@ -599,6 +627,66 @@ function prefillGenerator() {
 const match = (q, ...fields) => !q || fields.some(f => (f || "").toLowerCase().includes(q.toLowerCase()));
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+// --- Agent DSL: compile *.agent.next to a composite + polyglot client stubs -
+const DSL_SAMPLE = `agent greet-report
+description "Greet someone, then report stats on the greeting."
+
+input name: string
+
+step greeting = greet(name: input.name)
+step stats = text_stats(text: greeting.greeting)
+
+output greeting = greeting.greeting
+output characters = stats.characters
+output words = stats.words
+`;
+const DSL_EXT = { ts: "ts", js: "js", go: "go", rust: "rs", java: "java", proto: "proto" };
+let DSL_RESULT = null;
+
+function renderDslDiagram(composite) {
+  const node = (l, s) => `<span class="chip" style="padding:4px 10px">${esc(l)}${s ? `<br><span class="meta" style="font-size:10px">${esc(s)}</span>` : ""}</span>`;
+  const arrow = `<span style="color:var(--muted)">→</span>`;
+  const parts = [node("input")];
+  for (const s of composite.steps) parts.push(arrow, node(s.name, s.capability));
+  parts.push(arrow, node("output"));
+  $("dslDiagram").innerHTML = parts.join(" ");
+}
+
+function showDslCode() {
+  if (!DSL_RESULT || !DSL_RESULT.code) return;
+  $("dslCode").className = "";
+  $("dslCode").textContent = DSL_RESULT.code[$("dslLang").value] || "";
+}
+
+async function compileDsl(publish) {
+  const source = $("dslSource").value;
+  let body;
+  try {
+    body = await api("/agents/compile", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source, publish: !!publish }),
+    });
+  } catch (e) { $("dslCode").className = "err"; $("dslCode").textContent = e.message; return; }
+  if (!body.ok) {
+    DSL_RESULT = null;
+    $("dslDiagram").innerHTML = "";
+    $("dslCode").className = "err";
+    $("dslCode").textContent = "Errors:\n  " + body.errors.join("\n  ");
+    notify("agent.next: compile failed", "error");
+    return;
+  }
+  DSL_RESULT = body;
+  renderDslDiagram(body.composite);
+  showDslCode();
+  if (publish) {
+    notify(`Published agent ${body.agent.name}`, "success");
+    loadComposites();
+    loadComposite(body.agent.name);
+  } else {
+    notify(`Compiled agent ${body.agent.name}`, "info");
+  }
+}
+
 // --- Chat: deterministic console streaming over SSE -------------------------
 function appendChat(role, text) {
   const wrap = document.createElement("div");
@@ -789,6 +877,7 @@ async function loadAll() {
     [FEATURES, CAPS] = await Promise.all([api("/features"), api("/capabilities")]);
     renderStats(); renderCaps($("search").value); renderFeats($("search").value);
     fillFeatureSelect(); renderComparatorPicker(); initFlowBuilder();
+    if (!$("dslSource").value) $("dslSource").value = DSL_SAMPLE;
   } catch (e) {
     $("caps").innerHTML = $("feats").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
@@ -807,6 +896,18 @@ $("flowRun").onclick = runComposite;
 $("chatSend").onclick = chatSend;
 $("chatInput").onkeydown = e => { if (e.key === "Enter") chatSend(); };
 $("sigCheck").onclick = checkSignature;
+$("dslCompile").onclick = () => compileDsl(false);
+$("dslPublish").onclick = () => compileDsl(true);
+$("dslLang").onchange = showDslCode;
+$("dslCopy").onclick = () => DSL_RESULT && navigator.clipboard?.writeText(DSL_RESULT.code[$("dslLang").value] || "");
+$("dslDownload").onclick = () => {
+  if (!DSL_RESULT) return;
+  const lang = $("dslLang").value;
+  const name = `${DSL_RESULT.agent.name}.agent.${DSL_EXT[lang] || lang}`;
+  const blob = new Blob([DSL_RESULT.code[lang] || ""], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href);
+};
 $("genCopy").onclick = () => genActive && navigator.clipboard?.writeText(GEN_ARTIFACTS[genActive]);
 $("genDownload").onclick = () => {
   if (!genActive) return;
