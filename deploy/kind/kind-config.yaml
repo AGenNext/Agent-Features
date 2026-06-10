@@ -1,0 +1,11 @@
+# Single-node kind cluster for the end-to-end demo.
+# kind create cluster --name agent-features --config deploy/kind/kind-config.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: agent-features
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080   # NodePort for the gateway
+        hostPort: 8000
+        protocol: TCP

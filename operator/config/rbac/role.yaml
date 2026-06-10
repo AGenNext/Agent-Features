@@ -1,0 +1,22 @@
+# Permissions the operator needs. Keep in sync with the +kubebuilder:rbac
+# markers in internal/controller/feature_controller.go.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-features-operator-role
+rules:
+  - apiGroups: ["agentfeatures.io"]
+    resources: ["features"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["agentfeatures.io"]
+    resources: ["features/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["agentfeatures.io"]
+    resources: ["features/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

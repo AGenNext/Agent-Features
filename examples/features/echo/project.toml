@@ -1,0 +1,12 @@
+# Cloud Native Buildpacks descriptor.
+# Build the OCI image from source — no Dockerfile — with:
+#   pack build ghcr.io/agennext/feature-echo:0.1.0 \
+#     --path examples/features/echo --builder paketobuildpacks/builder-jammy-base
+schema-version = "0.2"
+
+[io.buildpacks]
+builder = "paketobuildpacks/builder-jammy-base"
+
+[[io.buildpacks.build.env]]
+name = "BP_CPYTHON_VERSION"
+value = "3.11.*"

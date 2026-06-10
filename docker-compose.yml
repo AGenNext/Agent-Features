@@ -1,0 +1,45 @@
+# Run the Agent Features stack locally.
+#
+#   docker compose up --build              # just the gateway (full marketplace)
+#   docker compose --profile observability up --build   # + agentless monitoring
+#
+# The gateway runs in dev mode (in-process sample features), so the whole
+# marketplace — discovery, invocation, capabilities, ranking, composition — is
+# live at http://localhost:8000 with no cluster.
+#
+# Note: the operator needs a Kubernetes API, so it is NOT part of this Compose
+# stack — use the kind path (`make e2e`) for the operator + gRPC feature pods.
+name: agent-features
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    image: agent-features-gateway:dev
+    environment:
+      # Empty -> dev mode (in-process features). Set to "cluster" only with k8s.
+      AGENT_FEATURES_MODE: ""
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/health')
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # Optional: Apache HertzBeat agentlessly probes the gateway (see
+  # observability/hertzbeat). Enable with `--profile observability`.
+  hertzbeat:
+    image: apache/hertzbeat:latest
+    profiles: ["observability"]
+    ports:
+      - "1157:1157"
+    depends_on:
+      gateway:
+        condition: service_healthy

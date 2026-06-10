@@ -1,0 +1,51 @@
+# Keyless Sigstore signing of feature manifests.
+#
+# Runs where an OIDC identity exists (GitHub Actions): cosign mints a
+# short-lived cert from Fulcio, signs each manifest's canonical digest, and
+# records it in the Rekor transparency log — no long-lived keys. The resulting
+# `<feature>.bundle` files are what gateway.signing verifies at runtime.
+#
+# NOTE: this org requires every `uses:` action to be pinned to a full-length
+# commit SHA (tag refs like `@v4` are rejected at startup). Before enabling
+# this workflow, replace each `@vN` below with the corresponding commit SHA,
+# e.g. `actions/checkout@<40-hex-sha>  # v4.2.2`. It is release/dispatch-only,
+# so it stays dormant until then.
+name: sign-features
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # required for cosign keyless (OIDC)
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+
+      # Canonical manifest JSON — exactly the bytes gateway.signing hashes.
+      - run: PYTHONPATH=. python scripts/export_manifests.py manifests
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Keyless sign each manifest
+        run: |
+          mkdir -p signatures
+          for m in manifests/*.json; do
+            name="$(basename "$m" .json)"
+            cosign sign-blob --yes --bundle "signatures/$name.bundle" "$m"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: feature-signatures
+          path: signatures/

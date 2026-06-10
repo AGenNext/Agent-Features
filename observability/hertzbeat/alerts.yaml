@@ -1,0 +1,28 @@
+# HertzBeat threshold/alert rules for the platform.
+# Each rule is a threshold expression over a monitored metric; HertzBeat fires
+# an alarm at the given severity when it holds. Wire notifications (Slack,
+# webhook, email) in HertzBeat's notice receivers.
+thresholds:
+  # Gateway is the single front door — page on any unavailability.
+  - name: gateway-down
+    metric: api_http.responseTime
+    expr: "equals(code, 0) || code >= 500"
+    priority: critical
+    times: 2            # consecutive evaluations before firing
+    target: gateway-health
+
+  # Latency SLO for the gateway.
+  - name: gateway-slow
+    metric: api_http.responseTime
+    expr: "responseTime > 2000"   # ms
+    priority: warning
+    times: 3
+    target: gateway-health
+
+  # Feature endpoint unreachable — surfaces a broken/unscheduled feature.
+  - name: feature-unreachable
+    metric: grpc.responseTime
+    expr: "responseTime <= 0"
+    priority: critical
+    times: 2
+    target: feature-echo

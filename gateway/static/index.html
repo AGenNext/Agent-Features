@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Features — Marketplace</title>
+  <style>
+    :root {
+      --bg: #0d1117; --panel: #161b22; --panel-2: #1c2330; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --accent: #2f81f7; --accent-2: #3fb950;
+      --warn: #d29922; --danger: #f85149; --chip: #21262d;
+      --official: #2f81f7; --verified: #3fb950; --community: #8b949e;
+    }
+    [data-theme="light"] {
+      --bg: #f6f8fa; --panel: #fff; --panel-2: #f0f3f6; --border: #d0d7de;
+      --text: #1f2328; --muted: #636c76; --chip: #eaeef2;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    header {
+      display: flex; align-items: center; gap: 16px; padding: 14px 20px;
+      border-bottom: 1px solid var(--border); background: var(--panel); position: sticky; top: 0; z-index: 5;
+    }
+    header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+    header h1 span { color: var(--accent); }
+    .health { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+    .dot.ok { background: var(--accent-2); box-shadow: 0 0 6px var(--accent-2); }
+    .dot.bad { background: var(--danger); }
+    .spacer { flex: 1; }
+    input, textarea, select, button {
+      font: inherit; color: var(--text); background: var(--panel-2);
+      border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
+    }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+    button { cursor: pointer; background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+    button.ghost { background: var(--panel-2); color: var(--text); border-color: var(--border); font-weight: 400; }
+    button:hover { filter: brightness(1.08); }
+    .stats { display: flex; gap: 10px; padding: 14px 20px 0; flex-wrap: wrap; }
+    .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; min-width: 110px; }
+    .stat .n { font-size: 22px; font-weight: 600; }
+    .stat .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px 20px 28px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; display: flex; flex-direction: column; min-height: 180px; }
+    .panel > h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted);
+      margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+    .panel > h2 .count { background: var(--chip); color: var(--muted); border-radius: 10px; padding: 1px 8px; font-size: 11px; }
+    .panel .body { padding: 10px 12px; overflow: auto; max-height: 360px; }
+    .card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; background: var(--panel-2); cursor: pointer; transition: border-color .12s; }
+    .card:hover { border-color: var(--accent); }
+    .card.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+    .card .row { display: flex; align-items: center; gap: 8px; }
+    .card .title { font-weight: 600; }
+    .card .desc { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+    .chip { background: var(--chip); border-radius: 10px; padding: 1px 8px; font-size: 11px; color: var(--muted); }
+    .badge { border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: 600; color: #fff; }
+    .badge.official { background: var(--official); }
+    .badge.verified { background: var(--verified); }
+    .badge.community { background: var(--community); }
+    .tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .rankrow { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 8px 4px; border-bottom: 1px solid var(--border); }
+    .rankrow:last-child { border-bottom: 0; }
+    .rankrow .who { font-weight: 600; }
+    .rankrow .meta { color: var(--muted); font-size: 12px; }
+    .bar { grid-column: 1 / -1; height: 5px; background: var(--chip); border-radius: 3px; overflow: hidden; }
+    .bar > i { display: block; height: 100%; background: var(--accent); }
+    .scorepill { font-variant-numeric: tabular-nums; color: var(--accent-2); font-weight: 600; }
+    .empty { color: var(--muted); padding: 24px 8px; text-align: center; font-size: 13px; }
+    .invoke { grid-column: 1 / -1; }
+    .invoke .body { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-height: none; }
+    @media (max-width: 700px) { .invoke .body { grid-template-columns: 1fr; } }
+    .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; }
+    .field label { font-size: 12px; color: var(--muted); }
+    textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+    pre { margin: 0; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow: auto; font-size: 12.5px; min-height: 120px; }
+    pre.err { border-color: var(--danger); color: var(--danger); }
+    .latency { color: var(--muted); font-size: 12px; margin-top: 6px; }
+    a.link { color: var(--accent); text-decoration: none; }
+    table.cmp { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+    table.cmp th, table.cmp td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
+    table.cmp th { color: var(--muted); font-weight: 600; background: var(--panel-2); }
+    table.cmp td .chip { margin-left: 4px; }
+    .pick { cursor: pointer; user-select: none; }
+    .pick input { margin-right: 4px; vertical-align: -1px; }
+    .evalrow { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: center; padding: 6px 2px; border-bottom: 1px solid var(--border); }
+    .evalrow:last-child { border-bottom: 0; }
+    .evalrow code { font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+    .good { color: var(--accent-2); font-weight: 700; }
+    .bad { color: var(--danger); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Agent <span>Features</span> · Marketplace</h1>
+    <span class="health"><span id="dot" class="dot"></span><span id="ver">connecting…</span></span>
+    <div class="spacer"></div>
+    <input id="search" placeholder="Search features &amp; capabilities…" style="width: 260px" />
+    <button class="ghost" id="refresh">Refresh</button>
+    <button class="ghost" id="bell" title="Notifications" style="position:relative">🔔<span id="bellBadge" style="display:none;position:absolute;top:-7px;right:-7px;background:var(--danger);color:#fff;border-radius:10px;font-size:10px;padding:0 5px;line-height:16px">0</span></button>
+    <button class="ghost" id="theme" title="Toggle theme">◐</button>
+    <a class="link" href="/docs" title="REST API docs" target="_blank">API ↗</a>
+  </header>
+
+  <div id="notifPanel" style="display:none;position:absolute;top:54px;right:20px;width:330px;max-height:380px;overflow:auto;background:var(--panel);border:1px solid var(--border);border-radius:10px;z-index:10;box-shadow:0 10px 28px rgba(0,0,0,.45)"></div>
+  <div id="toasts" style="position:fixed;bottom:18px;right:18px;display:flex;flex-direction:column;gap:8px;z-index:20"></div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Capabilities <span class="count" id="capCount">0</span></h2>
+      <div class="body" id="caps"><div class="empty">Loading…</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Live ranking <span class="count" id="rankFor">—</span></h2>
+      <div class="body" id="rank"><div class="empty">Select a capability to see how the marketplace ranks its vendors.</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Features <span class="count" id="featCount">0</span></h2>
+      <div class="body" id="feats"><div class="empty">Loading…</div></div>
+    </section>
+
+    <section class="panel invoke">
+      <h2>Invoke console</h2>
+      <div class="body">
+        <div>
+          <div class="field">
+            <label for="invFeature">Feature</label>
+            <select id="invFeature"></select>
+          </div>
+          <div class="field">
+            <label for="invInput">Input (JSON)</label>
+            <textarea id="invInput" spellcheck="false">{}</textarea>
+          </div>
+          <button id="invRun">Run ▸</button>
+        </div>
+        <div>
+          <div class="field">
+            <label>Output</label>
+            <pre id="invOut">—</pre>
+          </div>
+          <div class="latency" id="invLatency"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Comparator <span class="count" id="cmpCount">0</span></h2>
+      <div class="body">
+        <div id="cmpPick" class="tags" style="margin-bottom: 10px"></div>
+        <div id="cmpTable"><div class="empty">Pick two or more features to compare side by side.</div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Evaluator</h2>
+      <div class="body">
+        <div class="field">
+          <label for="evalFeature">Feature</label>
+          <select id="evalFeature"></select>
+        </div>
+        <div class="field">
+          <label for="evalCases">Test inputs — a JSON array of input objects</label>
+          <textarea id="evalCases" spellcheck="false">[]</textarea>
+        </div>
+        <button id="evalRun">Run suite ▸</button>
+        <div class="latency" id="evalSummary"></div>
+        <div id="evalResults" style="margin-top: 8px"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Chat <span class="count">deterministic</span></h2>
+      <div class="body">
+        <div id="chatLog" style="max-height:260px;overflow:auto;margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px">
+          <input id="chatInput" placeholder='calculator {"expression":"2+2"} · or "help"' style="flex:1" />
+          <button id="chatSend">Send</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Provenance · signer <span class="count">sigstore</span></h2>
+      <div class="body">
+        <div class="field"><label for="sigFeature">Feature</label><select id="sigFeature"></select></div>
+        <button id="sigCheck">Check signature ▸</button>
+        <div id="sigOut" style="margin-top:10px"><div class="empty">Check a feature's manifest digest and its Sigstore/cosign status.</div></div>
+      </div>
+    </section>
+
+    <section class="panel invoke">
+      <h2>Component generator <span class="count">scaffold + schema.org</span></h2>
+      <div class="body">
+        <div>
+          <div class="field"><label for="genName">Name</label><input id="genName" placeholder="sentiment" /></div>
+          <div class="field"><label for="genCap">Capability</label><input id="genCap" placeholder="sentiment" /></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="field"><label for="genVendor">Vendor</label><input id="genVendor" value="community" /></div>
+            <div class="field"><label for="genVer">Version</label><input id="genVer" value="1.0.0" /></div>
+          </div>
+          <div class="field"><label for="genDesc">Description</label><input id="genDesc" placeholder="Classify the sentiment of text." /></div>
+          <div class="field"><label for="genTags">Tags (comma-separated)</label><input id="genTags" placeholder="nlp, text" /></div>
+          <div class="field"><label for="genIn">Input schema (JSON)</label><textarea id="genIn" spellcheck="false"></textarea></div>
+          <div class="field"><label for="genOut">Output schema (JSON)</label><textarea id="genOut" spellcheck="false"></textarea></div>
+          <button id="genRun">Generate ▸</button>
+        </div>
+        <div>
+          <div class="field"><label>Artifacts</label><div class="tags" id="genTabs"></div></div>
+          <pre id="genOutput">Fill the form and Generate to scaffold a feature — manifest, a LocalInvoker handler, and a schema.org JSON-LD descriptor.</pre>
+          <div class="tags" style="margin-top:8px">
+            <button class="ghost" id="genCopy">Copy</button>
+            <button class="ghost" id="genDownload">Download</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel invoke">
+      <h2>Orchestrator · flow builder <span class="count" id="flowCount">0</span></h2>
+      <div class="body">
+        <div>
+          <div class="field"><label>Open an existing composite</label><div id="flowList" class="tags"></div></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="field"><label for="flowName">Name</label><input id="flowName" placeholder="greet-report" /></div>
+            <div class="field"><label for="flowDesc">Description</label><input id="flowDesc" /></div>
+          </div>
+          <div class="field"><label for="flowInput">Input schema (JSON)</label><textarea id="flowInput" spellcheck="false" style="min-height:80px"></textarea></div>
+          <div class="field"><label>Steps — each invokes a capability; map inputs with refs like <code>input.name</code> or <code>stepName.field</code></label>
+            <div id="flowSteps"></div>
+            <button class="ghost" id="flowAddStep" style="margin-top:6px">+ Step</button>
+          </div>
+          <div class="field"><label for="flowOutput">Output mapping (JSON: field → ref)</label><textarea id="flowOutput" spellcheck="false" style="min-height:60px"></textarea></div>
+          <div class="tags"><button id="flowPublish">Publish ▸</button><button class="ghost" id="flowRun">Run</button></div>
+        </div>
+        <div>
+          <div class="field"><label>Flow</label><div id="flowDiagram" class="tags"></div></div>
+          <div class="field"><label for="flowRunInput">Run input (JSON)</label><textarea id="flowRunInput" spellcheck="false" style="min-height:60px">{}</textarea></div>
+          <pre id="flowOut">Build a pipeline, Publish it, then Run to see output + per-step trace.</pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel invoke">
+      <h2>Agent DSL <span class="count">agent.next → 6 langs</span></h2>
+      <div class="body">
+        <div>
+          <div class="field"><label for="dslSource">Declare an agent (<code>*.agent.next</code>)</label>
+            <textarea id="dslSource" spellcheck="false" style="min-height:220px;font-family:var(--mono)"></textarea></div>
+          <div class="tags">
+            <button id="dslCompile">Compile ▸</button>
+            <button class="ghost" id="dslPublish">Publish &amp; open in builder</button>
+          </div>
+          <div class="field" style="margin-top:8px"><label>Flow</label><div id="dslDiagram" class="tags"></div></div>
+        </div>
+        <div>
+          <div class="field"><label for="dslLang">Generated client</label>
+            <select id="dslLang">
+              <option value="ts">TypeScript</option>
+              <option value="js">JavaScript</option>
+              <option value="go">Go</option>
+              <option value="rust">Rust</option>
+              <option value="java">Java</option>
+              <option value="proto">Protobuf</option>
+            </select></div>
+          <pre id="dslCode" style="min-height:230px">Write an agent on the left, then Compile to generate client stubs.</pre>
+          <div class="tags"><button class="ghost" id="dslCopy">Copy</button><button class="ghost" id="dslDownload">Download</button></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let FEATURES = [];      // [{manifest, phase, endpoint}]
+let CAPS = [];          // [{capability, description, provider_count, vendors, preferred}]
+let selectedCap = null;
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    let detail; try { detail = (await r.json()).detail; } catch { detail = r.statusText; }
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  return r.json();
+}
+
+function badge(trust) { return `<span class="badge ${trust}">${trust}</span>`; }
+
+// Build a minimal example object from a JSON Schema so the console is pre-filled.
+function exampleFromSchema(schema) {
+  if (!schema || schema.type !== "object" || !schema.properties) return {};
+  const out = {};
+  for (const [k, p] of Object.entries(schema.properties)) {
+    if (p.example !== undefined) out[k] = p.example;
+    else if (p.default !== undefined) out[k] = p.default;
+    else if (p.type === "number" || p.type === "integer") out[k] = 0;
+    else if (p.type === "boolean") out[k] = false;
+    else if (p.type === "array") out[k] = [];
+    else if (p.type === "object") out[k] = {};
+    else out[k] = "";
+  }
+  return out;
+}
+
+function renderStats() {
+  const vendors = new Set(FEATURES.map(f => f.manifest.vendor));
+  $("stats").innerHTML = [
+    ["Capabilities", CAPS.length],
+    ["Features", FEATURES.length],
+    ["Vendors", vendors.size],
+  ].map(([l, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+}
+
+function renderCaps(filter) {
+  const list = CAPS.filter(c => match(filter, c.capability, c.description, (c.vendors||[]).join(" ")));
+  $("capCount").textContent = list.length;
+  $("caps").innerHTML = list.length ? list.map(c => `
+    <div class="card ${c.capability === selectedCap ? "sel" : ""}" data-cap="${esc(c.capability)}">
+      <div class="row"><span class="title">${esc(c.capability)}</span>
+        <span class="chip">${c.provider_count} provider${c.provider_count === 1 ? "" : "s"}</span></div>
+      ${c.description ? `<div class="desc">${esc(c.description)}</div>` : ""}
+      <div class="tags">${(c.vendors||[]).map(v => `<span class="chip">${esc(v)}</span>`).join("")}
+        ${c.preferred ? `<span class="chip">★ ${esc(c.preferred)}</span>` : ""}</div>
+    </div>`).join("") : `<div class="empty">No capabilities match.</div>`;
+  for (const el of $("caps").querySelectorAll(".card")) {
+    el.onclick = () => selectCap(el.dataset.cap);
+  }
+}
+
+function renderFeats(filter) {
+  const list = FEATURES.filter(f => {
+    const m = f.manifest;
+    return match(filter, m.name, m.description, m.vendor, m.capability, (m.tags||[]).join(" "));
+  });
+  $("featCount").textContent = list.length;
+  $("feats").innerHTML = list.length ? list.map(f => {
+    const m = f.manifest;
+    return `<div class="card" data-feat="${esc(m.name)}">
+      <div class="row"><span class="title">${esc(m.name)}</span>${badge(m.trust)}
+        <span class="chip">v${esc(m.version)}</span><span class="spacer"></span>
+        <span class="chip">${esc(m.capability)}</span></div>
+      ${m.description ? `<div class="desc">${esc(m.description)}</div>` : ""}
+      <div class="tags"><span class="chip">${esc(m.vendor)}</span>
+        ${(m.tags||[]).map(t => `<span class="chip">#${esc(t)}</span>`).join("")}</div>
+    </div>`;
+  }).join("") : `<div class="empty">No features match.</div>`;
+  for (const el of $("feats").querySelectorAll(".card")) {
+    el.onclick = () => { $("invFeature").value = el.dataset.feat; onFeaturePick(); };
+  }
+}
+
+async function selectCap(cap) {
+  selectedCap = cap;
+  renderCaps($("search").value);
+  $("rankFor").textContent = cap;
+  $("rank").innerHTML = `<div class="empty">Loading ranking…</div>`;
+  try {
+    const scores = await api(`/capabilities/${encodeURIComponent(cap)}/ranking`);
+    const max = Math.max(...scores.map(s => s.score), 0.0001);
+    $("rank").innerHTML = scores.map((s, i) => `
+      <div class="rankrow">
+        <div><span class="who">${i === 0 ? "★ " : ""}${esc(s.vendor)}</span>
+          <span class="chip">v${esc(s.version)}</span></div>
+        <div class="scorepill">${s.score.toFixed(3)}</div>
+        <div class="bar"><i style="width:${(s.score / max * 100).toFixed(1)}%"></i></div>
+        <div class="meta" style="grid-column:1/-1">
+          ${s.invocations} call${s.invocations === 1 ? "" : "s"}
+          · success ${s.success_rate == null ? "—" : (s.success_rate * 100).toFixed(0) + "%"}
+          · avg ${s.avg_latency_ms == null ? "—" : s.avg_latency_ms.toFixed(1) + " ms"}
+        </div>
+      </div>`).join("");
+  } catch (e) {
+    $("rank").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+function onFeaturePick() {
+  const f = FEATURES.find(f => f.manifest.name === $("invFeature").value);
+  if (f) $("invInput").value = JSON.stringify(exampleFromSchema(f.manifest.input_schema), null, 2);
+}
+
+async function runInvoke() {
+  const name = $("invFeature").value;
+  $("invOut").className = ""; $("invOut").textContent = "Running…"; $("invLatency").textContent = "";
+  let input;
+  try { input = JSON.parse($("invInput").value || "{}"); }
+  catch (e) { $("invOut").className = "err"; $("invOut").textContent = "Invalid JSON: " + e.message; return; }
+  try {
+    const res = await api(`/features/${encodeURIComponent(name)}/invoke`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input }),
+    });
+    $("invOut").textContent = JSON.stringify(res.output, null, 2);
+    $("invLatency").textContent = `${res.vendor} · v${res.version} · ${res.latency_ms.toFixed(1)} ms`;
+    notify(`${name} → ${res.latency_ms.toFixed(1)} ms`, "success");
+    if (selectedCap) selectCap(selectedCap);   // refresh ranking with the new metric
+  } catch (e) {
+    $("invOut").className = "err"; $("invOut").textContent = e.message;
+    notify(`${name} failed: ${e.message}`, "error");
+  }
+}
+
+function featureOptions() {
+  return FEATURES.map(f =>
+    `<option value="${esc(f.manifest.name)}">${esc(f.manifest.name)} — ${esc(f.manifest.vendor)}</option>`).join("");
+}
+
+function fillFeatureSelect() {
+  $("invFeature").innerHTML = featureOptions();
+  $("evalFeature").innerHTML = featureOptions();
+  $("sigFeature").innerHTML = featureOptions();
+  onFeaturePick();
+  onEvalPick();
+}
+
+// --- Provenance / signer: manifest digest + Sigstore status -----------------
+async function checkSignature() {
+  const name = $("sigFeature").value;
+  $("sigOut").innerHTML = `<div class="empty">Checking…</div>`;
+  try {
+    const s = await api(`/features/${encodeURIComponent(name)}/signature`);
+    const color = s.status === "verified" ? "var(--accent-2)" : s.status === "failed" ? "var(--danger)" : "var(--muted)";
+    $("sigOut").innerHTML = `
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+        <span class="chip" style="color:#fff;background:${color}">${esc(s.status)}</span>
+        <span class="meta">${s.signed ? "bundle present" : "no signature bundle"}</span></div>
+      <div class="field"><label>Manifest digest (${esc(s.algorithm)})</label><pre style="min-height:auto">${esc(s.digest)}</pre></div>
+      ${s.reason ? `<div class="meta" style="margin-bottom:6px">${esc(s.reason)}</div>` : ""}
+      <div class="field"><label>Verify with cosign</label><pre style="min-height:auto">${esc(s.command)}</pre></div>
+      <button class="ghost" id="sigCopy">Copy command</button>`;
+    $("sigCopy").onclick = () => navigator.clipboard?.writeText(s.command);
+    notify(`Signature ${name}: ${s.status}`, s.status === "failed" ? "error" : "info");
+  } catch (e) { $("sigOut").innerHTML = `<div class="empty bad">${esc(e.message)}</div>`; }
+}
+
+// --- Comparator: pick N features, diff their manifests side by side ---------
+function renderComparatorPicker() {
+  $("cmpPick").innerHTML = FEATURES.map(f =>
+    `<label class="chip pick"><input type="checkbox" value="${esc(f.manifest.name)}">${esc(f.manifest.name)}</label>`).join("");
+  for (const cb of $("cmpPick").querySelectorAll("input")) cb.onchange = renderComparison;
+  renderComparison();
+}
+
+function schemaFields(schema) {
+  if (!schema || !schema.properties) return "—";
+  const req = new Set(schema.required || []);
+  return Object.entries(schema.properties).map(([k, p]) =>
+    `${esc(k)}<span class="chip">${esc(p.type || "any")}${req.has(k) ? " *" : ""}</span>`).join("<br>");
+}
+
+function renderComparison() {
+  const picked = [...$("cmpPick").querySelectorAll("input:checked")].map(c => c.value);
+  $("cmpCount").textContent = picked.length;
+  if (picked.length < 2) {
+    $("cmpTable").innerHTML = `<div class="empty">Pick two or more features to compare side by side.</div>`;
+    return;
+  }
+  const feats = picked.map(n => FEATURES.find(f => f.manifest.name === n)).filter(Boolean);
+  const rows = [
+    ["Vendor", f => esc(f.manifest.vendor)],
+    ["Trust", f => badge(f.manifest.trust)],
+    ["Version", f => "v" + esc(f.manifest.version)],
+    ["Capability", f => esc(f.manifest.capability)],
+    ["Protocol", f => esc(f.manifest.protocol)],
+    ["Tags", f => (f.manifest.tags || []).map(t => "#" + esc(t)).join(" ") || "—"],
+    ["Inputs", f => schemaFields(f.manifest.input_schema)],
+    ["Outputs", f => schemaFields(f.manifest.output_schema)],
+    ["Phase", f => esc(f.phase)],
+  ];
+  let html = `<div style="overflow:auto"><table class="cmp"><tr><th></th>${
+    feats.map(f => `<th>${esc(f.manifest.name)}</th>`).join("")}</tr>`;
+  for (const [label, fn] of rows) {
+    html += `<tr><th>${label}</th>${feats.map(f => `<td>${fn(f)}</td>`).join("")}</tr>`;
+  }
+  $("cmpTable").innerHTML = html + `</table></div>`;
+}
+
+// --- Evaluator: run a suite of inputs against a feature, score the results --
+function onEvalPick() {
+  const f = FEATURES.find(f => f.manifest.name === $("evalFeature").value);
+  if (f) $("evalCases").value = JSON.stringify([exampleFromSchema(f.manifest.input_schema)], null, 2);
+}
+
+const avg = (a) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;
+
+async function runEvaluator() {
+  const name = $("evalFeature").value;
+  let cases;
+  try { cases = JSON.parse($("evalCases").value || "[]"); }
+  catch (e) { $("evalResults").innerHTML = `<div class="empty bad">Invalid JSON: ${esc(e.message)}</div>`; return; }
+  if (!Array.isArray(cases) || !cases.length) {
+    $("evalResults").innerHTML = `<div class="empty">Provide a non-empty JSON array of input objects.</div>`; return;
+  }
+  $("evalSummary").textContent = ""; $("evalResults").innerHTML = `<div class="empty">Running ${cases.length} case(s)…</div>`;
+  const results = [];
+  for (const input of cases) {
+    const t0 = performance.now();
+    try {
+      const res = await api(`/features/${encodeURIComponent(name)}/invoke`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ input }),
+      });
+      results.push({ ok: true, input, output: res.output, ms: res.latency_ms });
+    } catch (e) {
+      results.push({ ok: false, input, error: e.message, ms: performance.now() - t0 });
+    }
+  }
+  const lat = results.filter(r => r.ok).map(r => r.ms).sort((a, b) => a - b);
+  const p95 = lat.length ? lat[Math.min(lat.length - 1, Math.floor(lat.length * 0.95))] : 0;
+  const oks = results.filter(r => r.ok).length;
+  $("evalSummary").textContent =
+    `${oks}/${results.length} ok · success ${(oks / results.length * 100).toFixed(0)}% · avg ${avg(lat).toFixed(1)} ms · p95 ${p95.toFixed(1)} ms`;
+  $("evalResults").innerHTML = results.map(r => `
+    <div class="evalrow">
+      <span class="${r.ok ? "good" : "bad"}">${r.ok ? "✓" : "✗"}</span>
+      <code>${esc(JSON.stringify(r.input))} → ${esc(r.ok ? JSON.stringify(r.output) : r.error)}</code>
+      <span class="meta">${r.ms.toFixed(1)} ms</span>
+    </div>`).join("");
+  notify(`Evaluated ${name}: ${oks}/${results.length} ok`, oks === results.length ? "success" : "error");
+  if (selectedCap) selectCap(selectedCap);   // metrics moved — refresh ranking
+}
+
+// --- Component generator: scaffold a feature + schema.org descriptor --------
+let GEN_ARTIFACTS = {}, genActive = null;
+
+function pyManifest(m) {
+  const tags = (m.tags || []).map(t => JSON.stringify(t)).join(", ");
+  const ind = (o) => JSON.stringify(o, null, 4).split("\n").join("\n        ");
+  return `"""Feature: ${m.name} — generated scaffold (dev / LocalInvoker)."""
+from typing import Any
+
+from gateway.catalog import InMemoryCatalog
+from gateway.invoker import FeatureInputError, Handler, LocalInvoker
+from gateway.models import Manifest, TrustTier
+
+
+def ${m.fn}(payload: dict[str, Any]) -> dict[str, Any]:
+    # TODO: implement. 'payload' is already validated against input_schema.
+    raise FeatureInputError("not implemented")
+
+
+MANIFEST = Manifest(
+    name=${JSON.stringify(m.name)},
+    capability=${JSON.stringify(m.capability)},
+    vendor=${JSON.stringify(m.vendor)},
+    version=${JSON.stringify(m.version)},
+    description=${JSON.stringify(m.description)},
+    tags=[${tags}],
+    trust=TrustTier.${m.trust},
+    input_schema=${ind(m.input_schema)},
+    output_schema=${ind(m.output_schema)},
+)
+`;
+}
+
+function jsonManifest(m) {
+  return JSON.stringify({
+    name: m.name, capability: m.capability, vendor: m.vendor, version: m.version,
+    description: m.description, tags: m.tags, visibility: "public", protocol: "grpc",
+    trust: m.trust.toLowerCase(), input_schema: m.input_schema, output_schema: m.output_schema,
+  }, null, 2);
+}
+
+function jsonldManifest(m) {
+  // schema.org SoftwareApplication describing the feature as a callable action.
+  return JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: m.name, applicationCategory: "AgentFeature", softwareVersion: m.version,
+    description: m.description, keywords: (m.tags || []).join(", "),
+    author: { "@type": "Organization", name: m.vendor },
+    potentialAction: {
+      "@type": "Action",
+      name: m.capability,
+      target: { "@type": "EntryPoint", urlTemplate: `/features/${m.name}/invoke`, httpMethod: "POST" },
+    },
+  }, null, 2);
+}
+
+function generate() {
+  const name = $("genName").value.trim() || "feature";
+  let inSchema, outSchema;
+  try { inSchema = JSON.parse($("genIn").value || "{}"); outSchema = JSON.parse($("genOut").value || "{}"); }
+  catch (e) { $("genOutput").className = "err"; $("genOutput").textContent = "Invalid schema JSON: " + e.message; return; }
+  $("genOutput").className = "";
+  const m = {
+    name, fn: "_" + name.replace(/[^A-Za-z0-9_]/g, "_"),
+    capability: $("genCap").value.trim() || name,
+    vendor: $("genVendor").value.trim() || "community",
+    version: $("genVer").value.trim() || "1.0.0",
+    description: $("genDesc").value.trim(),
+    tags: $("genTags").value.split(",").map(s => s.trim()).filter(Boolean),
+    trust: "COMMUNITY",
+    input_schema: inSchema, output_schema: outSchema,
+  };
+  GEN_ARTIFACTS = {
+    [`${m.fn.slice(1)}.py`]: pyManifest(m),
+    "manifest.json": jsonManifest(m),
+    [`${name}.jsonld`]: jsonldManifest(m),
+  };
+  $("genTabs").innerHTML = Object.keys(GEN_ARTIFACTS).map((k, i) =>
+    `<span class="chip pick gentab" data-k="${esc(k)}">${esc(k)}</span>`).join("");
+  for (const el of $("genTabs").querySelectorAll(".gentab")) el.onclick = () => showArtifact(el.dataset.k);
+  showArtifact(Object.keys(GEN_ARTIFACTS)[0]);
+}
+
+function showArtifact(k) {
+  genActive = k;
+  $("genOutput").className = ""; $("genOutput").textContent = GEN_ARTIFACTS[k];
+  for (const el of $("genTabs").querySelectorAll(".gentab"))
+    el.style.borderColor = el.dataset.k === k ? "var(--accent)" : "";
+}
+
+function prefillGenerator() {
+  if (!$("genIn").value) $("genIn").value = JSON.stringify(
+    { type: "object", properties: { text: { type: "string" } }, required: ["text"] }, null, 2);
+  if (!$("genOut").value) $("genOut").value = JSON.stringify(
+    { type: "object", properties: { label: { type: "string" }, score: { type: "number" } } }, null, 2);
+}
+
+const match = (q, ...fields) => !q || fields.some(f => (f || "").toLowerCase().includes(q.toLowerCase()));
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// --- Agent DSL: compile *.agent.next to a composite + polyglot client stubs -
+const DSL_SAMPLE = `agent greet-report
+description "Greet someone, then report stats on the greeting."
+
+input name: string
+
+step greeting = greet(name: input.name)
+step stats = text_stats(text: greeting.greeting)
+
+output greeting = greeting.greeting
+output characters = stats.characters
+output words = stats.words
+`;
+const DSL_EXT = { ts: "ts", js: "js", go: "go", rust: "rs", java: "java", proto: "proto" };
+let DSL_RESULT = null;
+
+function renderDslDiagram(composite) {
+  const node = (l, s) => `<span class="chip" style="padding:4px 10px">${esc(l)}${s ? `<br><span class="meta" style="font-size:10px">${esc(s)}</span>` : ""}</span>`;
+  const arrow = `<span style="color:var(--muted)">→</span>`;
+  const parts = [node("input")];
+  for (const s of composite.steps) parts.push(arrow, node(s.name, s.capability));
+  parts.push(arrow, node("output"));
+  $("dslDiagram").innerHTML = parts.join(" ");
+}
+
+function showDslCode() {
+  if (!DSL_RESULT || !DSL_RESULT.code) return;
+  $("dslCode").className = "";
+  $("dslCode").textContent = DSL_RESULT.code[$("dslLang").value] || "";
+}
+
+async function compileDsl(publish) {
+  const source = $("dslSource").value;
+  let body;
+  try {
+    body = await api("/agents/compile", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source, publish: !!publish }),
+    });
+  } catch (e) { $("dslCode").className = "err"; $("dslCode").textContent = e.message; return; }
+  if (!body.ok) {
+    DSL_RESULT = null;
+    $("dslDiagram").innerHTML = "";
+    $("dslCode").className = "err";
+    $("dslCode").textContent = "Errors:\n  " + body.errors.join("\n  ");
+    notify("agent.next: compile failed", "error");
+    return;
+  }
+  DSL_RESULT = body;
+  renderDslDiagram(body.composite);
+  showDslCode();
+  if (publish) {
+    notify(`Published agent ${body.agent.name}`, "success");
+    loadComposites();
+    loadComposite(body.agent.name);
+  } else {
+    notify(`Compiled agent ${body.agent.name}`, "info");
+  }
+}
+
+// --- Chat: deterministic console streaming over SSE -------------------------
+function appendChat(role, text) {
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "margin-bottom:10px";
+  wrap.innerHTML = `<div class="meta" style="font-size:11px">${role === "user" ? "you" : "gateway"}</div>`;
+  const body = document.createElement("div");
+  if (text) body.textContent = text;
+  wrap.appendChild(body); $("chatLog").appendChild(wrap);
+  $("chatLog").scrollTop = $("chatLog").scrollHeight;
+  return body;
+}
+
+function handleChatEvent(e, el) {
+  if (e.type === "status") el.innerHTML += `<div class="meta">${esc(e.text)}</div>`;
+  else if (e.type === "error") { el.innerHTML += `<div class="bad">✗ ${esc(e.message)}</div>`; notify("chat: " + e.message, "error"); }
+  else if (e.type === "result") {
+    el.innerHTML += `<div class="good">✓ ${esc(e.vendor)}/${esc(e.feature)} · ${e.latency_ms.toFixed(1)} ms</div>` +
+      `<pre style="min-height:auto;margin-top:4px">${esc(JSON.stringify(e.output, null, 2))}</pre>`;
+    if (selectedCap) selectCap(selectedCap);
+  }
+  $("chatLog").scrollTop = $("chatLog").scrollHeight;
+}
+
+async function chatSend() {
+  const msg = $("chatInput").value.trim();
+  if (!msg) return;
+  appendChat("user", msg); $("chatInput").value = "";
+  const el = appendChat("gateway", "");
+  let res;
+  try {
+    res = await fetch("/chat/stream", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: msg }),
+    });
+  } catch (e) { handleChatEvent({ type: "error", message: e.message }, el); return; }
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+      if (chunk.startsWith("data: ")) { try { handleChatEvent(JSON.parse(chunk.slice(6)), el); } catch {} }
+    }
+  }
+}
+
+// --- Orchestrator / flow builder: compose capabilities into a pipeline ------
+let FLOW_STEPS = [];
+
+function capOptions(sel) {
+  return CAPS.map(c => `<option value="${esc(c.capability)}"${c.capability === sel ? " selected" : ""}>${esc(c.capability)}</option>`).join("");
+}
+
+function renderSteps() {
+  $("flowSteps").innerHTML = FLOW_STEPS.map((s, i) => `
+    <div class="evalrow" data-i="${i}" style="grid-template-columns:90px 1fr 1.3fr auto">
+      <input class="stepName" value="${esc(s.name)}" placeholder="step" />
+      <select class="stepCap">${capOptions(s.capability)}</select>
+      <input class="stepInputs" value="${esc(s.inputs)}" placeholder='{"name":"input.name"}' />
+      <button class="ghost stepDel" title="remove">✕</button>
+    </div>`).join("") || `<div class="empty">No steps yet — add one.</div>`;
+  for (const row of $("flowSteps").querySelectorAll(".evalrow")) {
+    const i = +row.dataset.i;
+    row.querySelector(".stepName").oninput = e => { FLOW_STEPS[i].name = e.target.value; renderFlowDiagram(); };
+    row.querySelector(".stepCap").onchange = e => { FLOW_STEPS[i].capability = e.target.value; renderFlowDiagram(); };
+    row.querySelector(".stepInputs").oninput = e => { FLOW_STEPS[i].inputs = e.target.value; };
+    row.querySelector(".stepDel").onclick = () => { FLOW_STEPS.splice(i, 1); renderSteps(); renderFlowDiagram(); };
+  }
+  renderFlowDiagram();
+}
+
+function renderFlowDiagram() {
+  const node = (label, sub) => `<span class="chip" style="padding:4px 10px">${esc(label)}${sub ? `<br><span class="meta" style="font-size:10px">${esc(sub)}</span>` : ""}</span>`;
+  const arrow = `<span style="color:var(--muted)">→</span>`;
+  const parts = [node("input")];
+  for (const s of FLOW_STEPS) { parts.push(arrow, node(s.name || "step", s.capability)); }
+  parts.push(arrow, node("output"));
+  $("flowDiagram").innerHTML = parts.join(" ");
+}
+
+function buildSpec() {
+  const steps = [];
+  for (const s of FLOW_STEPS) {
+    let inputs;
+    try { inputs = JSON.parse(s.inputs || "{}"); }
+    catch { throw new Error(`step '${s.name}': inputs is not valid JSON`); }
+    steps.push({ name: s.name, capability: s.capability, inputs });
+  }
+  return {
+    name: $("flowName").value.trim(),
+    description: $("flowDesc").value.trim(),
+    input_schema: JSON.parse($("flowInput").value || "{}"),
+    steps,
+    output: JSON.parse($("flowOutput").value || "{}"),
+  };
+}
+
+async function publishComposite() {
+  let spec;
+  try { spec = buildSpec(); } catch (e) { $("flowOut").className = "err"; $("flowOut").textContent = e.message; return; }
+  if (!spec.name) { $("flowOut").className = "err"; $("flowOut").textContent = "Name is required."; return; }
+  try {
+    await api("/compose", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(spec) });
+    $("flowOut").className = ""; $("flowOut").textContent = `Published composite '${spec.name}'.`;
+    notify(`Published composite ${spec.name}`, "success");
+    loadComposites();
+  } catch (e) { $("flowOut").className = "err"; $("flowOut").textContent = e.message; notify(`Publish failed: ${e.message}`, "error"); }
+}
+
+async function runComposite() {
+  const name = $("flowName").value.trim();
+  if (!name) { $("flowOut").className = "err"; $("flowOut").textContent = "Name a composite (and Publish) first."; return; }
+  let input;
+  try { input = JSON.parse($("flowRunInput").value || "{}"); }
+  catch (e) { $("flowOut").className = "err"; $("flowOut").textContent = "Run input is not valid JSON: " + e.message; return; }
+  try {
+    const res = await api(`/composites/${encodeURIComponent(name)}/invoke`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ input }),
+    });
+    const trace = res.trace.map(t => `  ${t.step} (${t.capability}) → ${JSON.stringify(t.output)}`).join("\n");
+    $("flowOut").className = res.error ? "err" : "";
+    $("flowOut").textContent = (res.error ? `error: ${res.error}\n\n` : "") +
+      `output: ${JSON.stringify(res.output, null, 2)}\n\ntrace:\n${trace || "  (none)"}`;
+    notify(res.error ? `${name}: ${res.error}` : `Ran composite ${name}`, res.error ? "error" : "success");
+    if (selectedCap) selectCap(selectedCap);
+  } catch (e) { $("flowOut").className = "err"; $("flowOut").textContent = e.message; notify(`${name} failed: ${e.message}`, "error"); }
+}
+
+async function loadComposites() {
+  let list = [];
+  try { list = await api("/composites"); } catch { /* endpoint absent → no-op */ }
+  $("flowCount").textContent = list.length;
+  $("flowList").innerHTML = list.map(c => `<span class="chip pick flowopen" data-n="${esc(c.name)}">${esc(c.name)}</span>`).join("")
+    || `<div class="empty" style="padding:6px">none yet</div>`;
+  for (const el of $("flowList").querySelectorAll(".flowopen")) el.onclick = () => loadComposite(el.dataset.n);
+}
+
+async function loadComposite(name) {
+  const c = await api(`/composites/${encodeURIComponent(name)}`);
+  $("flowName").value = c.name; $("flowDesc").value = c.description || "";
+  $("flowInput").value = JSON.stringify(c.input_schema || {}, null, 2);
+  $("flowOutput").value = JSON.stringify(c.output || {}, null, 2);
+  FLOW_STEPS = (c.steps || []).map(s => ({
+    name: s.name, capability: s.capability, vendor: s.vendor, version: s.version,
+    inputs: JSON.stringify(s.inputs || {}),
+  }));
+  renderSteps();
+}
+
+function initFlowBuilder() {
+  if (!$("flowInput").value)
+    $("flowInput").value = JSON.stringify({ type: "object", properties: { name: { type: "string" } }, required: ["name"] }, null, 2);
+  if (FLOW_STEPS.length === 0) FLOW_STEPS = [{ name: "step1", capability: CAPS[0]?.capability || "", inputs: "{}" }];
+  renderSteps(); loadComposites();
+}
+
+// --- Notifications: a client-side activity feed + toasts --------------------
+const NOTIFS = []; let unseen = 0;
+function notify(message, kind = "info") {
+  const n = { message, kind, t: new Date() };
+  NOTIFS.unshift(n); unseen++;
+  const b = $("bellBadge");
+  if (unseen > 0) { b.style.display = ""; b.textContent = unseen; }
+  if ($("notifPanel").style.display !== "none") renderNotifPanel();
+  const el = document.createElement("div");
+  const c = kind === "error" ? "var(--danger)" : kind === "success" ? "var(--accent-2)" : "var(--accent)";
+  el.style.cssText = `background:var(--panel-2);border:1px solid var(--border);border-left:3px solid ${c};border-radius:8px;padding:8px 12px;max-width:320px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.3)`;
+  el.textContent = message; $("toasts").appendChild(el);
+  setTimeout(() => { el.style.transition = "opacity .4s"; el.style.opacity = "0"; setTimeout(() => el.remove(), 400); }, 3500);
+}
+function renderNotifPanel() {
+  $("notifPanel").innerHTML = NOTIFS.length ? NOTIFS.slice(0, 50).map(n => `
+    <div style="padding:8px 12px;border-bottom:1px solid var(--border)">
+      <span class="${n.kind === "error" ? "bad" : n.kind === "success" ? "good" : ""}">${n.kind === "error" ? "✗" : n.kind === "success" ? "✓" : "•"}</span>
+      ${esc(n.message)}<div class="meta" style="font-size:11px">${n.t.toLocaleTimeString()}</div>
+    </div>`).join("") : `<div class="empty">No activity yet.</div>`;
+}
+
+async function loadAll() {
+  try {
+    const info = await api("/health");
+    $("dot").className = "dot ok";
+    const root = await api("/"); $("ver").textContent = "gateway v" + root.version;
+  } catch { $("dot").className = "dot bad"; $("ver").textContent = "gateway unreachable"; }
+  try {
+    [FEATURES, CAPS] = await Promise.all([api("/features"), api("/capabilities")]);
+    renderStats(); renderCaps($("search").value); renderFeats($("search").value);
+    fillFeatureSelect(); renderComparatorPicker(); initFlowBuilder();
+    if (!$("dslSource").value) $("dslSource").value = DSL_SAMPLE;
+  } catch (e) {
+    $("caps").innerHTML = $("feats").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+$("search").oninput = (e) => { renderCaps(e.target.value); renderFeats(e.target.value); };
+$("refresh").onclick = loadAll;
+$("invRun").onclick = runInvoke;
+$("invFeature").onchange = onFeaturePick;
+$("evalRun").onclick = runEvaluator;
+$("evalFeature").onchange = onEvalPick;
+$("genRun").onclick = generate;
+$("flowAddStep").onclick = () => { FLOW_STEPS.push({ name: "step" + (FLOW_STEPS.length + 1), capability: CAPS[0]?.capability || "", inputs: "{}" }); renderSteps(); };
+$("flowPublish").onclick = publishComposite;
+$("flowRun").onclick = runComposite;
+$("chatSend").onclick = chatSend;
+$("chatInput").onkeydown = e => { if (e.key === "Enter") chatSend(); };
+$("sigCheck").onclick = checkSignature;
+$("dslCompile").onclick = () => compileDsl(false);
+$("dslPublish").onclick = () => compileDsl(true);
+$("dslLang").onchange = showDslCode;
+$("dslCopy").onclick = () => DSL_RESULT && navigator.clipboard?.writeText(DSL_RESULT.code[$("dslLang").value] || "");
+$("dslDownload").onclick = () => {
+  if (!DSL_RESULT) return;
+  const lang = $("dslLang").value;
+  const name = `${DSL_RESULT.agent.name}.agent.${DSL_EXT[lang] || lang}`;
+  const blob = new Blob([DSL_RESULT.code[lang] || ""], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href);
+};
+$("genCopy").onclick = () => genActive && navigator.clipboard?.writeText(GEN_ARTIFACTS[genActive]);
+$("genDownload").onclick = () => {
+  if (!genActive) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([GEN_ARTIFACTS[genActive]], { type: "text/plain" }));
+  a.download = genActive; a.click(); URL.revokeObjectURL(a.href);
+};
+prefillGenerator();
+$("bell").onclick = () => {
+  const p = $("notifPanel"), show = p.style.display === "none";
+  p.style.display = show ? "block" : "none";
+  if (show) { unseen = 0; $("bellBadge").style.display = "none"; renderNotifPanel(); }
+};
+$("theme").onclick = () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next; localStorage.setItem("af-theme", next);
+};
+document.documentElement.dataset.theme = localStorage.getItem("af-theme") || "dark";
+loadAll();
+</script>
+</body>
+</html>

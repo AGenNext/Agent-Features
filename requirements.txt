@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+jsonschema>=4.21
+# Cluster mode (KubernetesCatalog + GrpcInvoker). Unused by the in-process dev
+# path, which lazy-imports these only when selected.
+grpcio>=1.62
+protobuf>=4.25
+kubernetes>=29.0

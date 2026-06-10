@@ -1,0 +1,23 @@
+apiVersion: agentfeatures.io/v1alpha1
+kind: Feature
+metadata:
+  name: echo
+  namespace: features
+spec:
+  description: "Echoes its input back — the reference feature."
+  image: ghcr.io/agennext/feature-echo:0.1.0
+  protocol: grpc
+  port: 9090
+  tags: [example, utility]
+  visibility: Public
+  inputSchema: |
+    {"type":"object","properties":{"message":{"type":"string"}},"required":["message"]}
+  outputSchema: |
+    {"type":"object","properties":{"echo":{"type":"string"}}}
+  runtime:
+    minReplicas: 1
+    maxReplicas: 5
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"

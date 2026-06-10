@@ -1,0 +1,167 @@
+// Agent Features Platform — protocol-first contract.
+//
+// This file is the source of truth for the platform. The agent-facing MCP
+// layer, the FastAPI gateway, the Go operator, and every feature runtime are
+// all defined in terms of the messages and services below.
+//
+// Two services:
+//   - FeatureCatalog : discover/describe published capabilities (read side).
+//   - FeatureService : the contract every feature workload implements, and
+//                      which the gateway calls to run a capability.
+//
+// Codegen:
+//   buf generate            # or
+//   protoc --go_out=. --go-grpc_out=. proto/agentfeatures/v1/feature.proto
+
+syntax = "proto3";
+
+package agentfeatures.v1;
+
+option go_package = "github.com/AGenNext/Agent-Features/gen/agentfeatures/v1;agentfeaturesv1";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// ---------------------------------------------------------------------------
+// Core types
+// ---------------------------------------------------------------------------
+
+// Manifest is the self-describing record of a capability. It is the unit an
+// agent reasons about: name + description + JSON Schemas map 1:1 onto an MCP
+// tool definition.
+message Manifest {
+  string name = 1;                 // unique, DNS-label safe
+  string version = 2;              // semver
+  string description = 3;          // natural-language; feeds semantic discovery
+  repeated string tags = 4;        // e.g. ["web", "nlp", "ai"]
+
+  // JSON Schema documents (draft 2020-12) serialized as strings. The
+  // input_schema doubles as the MCP tool inputSchema.
+  string input_schema = 5;
+  string output_schema = 6;
+
+  Visibility visibility = 7;
+  Protocol protocol = 8;           // how the gateway reaches the workload
+
+  // Marketplace identity. Many vendors' features can share one capability;
+  // the marketplace key is (capability, vendor, version).
+  string capability = 9;           // canonical capability; defaults to name
+  string vendor = 10;              // who publishes this implementation
+  TrustTier trust = 11;            // ranking input
+}
+
+enum Visibility {
+  VISIBILITY_UNSPECIFIED = 0;
+  VISIBILITY_PUBLIC = 1;           // discoverable by any agent
+  VISIBILITY_INTERNAL = 2;         // discoverable within the cluster/tenant
+  VISIBILITY_PRIVATE = 3;          // owner-only
+}
+
+enum TrustTier {
+  TRUST_TIER_UNSPECIFIED = 0;
+  TRUST_TIER_OFFICIAL = 1;         // first-party / platform-owned
+  TRUST_TIER_VERIFIED = 2;         // reviewed third party
+  TRUST_TIER_COMMUNITY = 3;        // unreviewed
+}
+
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_GRPC = 1;               // workload implements FeatureService
+  PROTOCOL_HTTP = 2;               // workload exposes a JSON HTTP endpoint
+}
+
+// Phase mirrors the Feature CR status in Kubernetes.
+enum Phase {
+  PHASE_UNSPECIFIED = 0;
+  PHASE_PENDING = 1;
+  PHASE_PROVISIONING = 2;
+  PHASE_READY = 3;
+  PHASE_FAILED = 4;
+}
+
+message Feature {
+  Manifest manifest = 1;
+  Phase phase = 2;
+  string endpoint = 3;             // in-cluster address once Ready
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+// ---------------------------------------------------------------------------
+// FeatureCatalog — discovery (read side)
+// ---------------------------------------------------------------------------
+
+service FeatureCatalog {
+  // Discover browses/searches the catalog. Empty query returns everything the
+  // caller may see.
+  rpc Discover(DiscoverRequest) returns (DiscoverResponse);
+
+  // Describe returns the full manifest for one feature.
+  rpc Describe(DescribeRequest) returns (Feature);
+}
+
+message DiscoverRequest {
+  string query = 1;                // free text; backed by semantic search
+  repeated string tags = 2;        // AND-filter
+  Visibility visibility = 3;       // optional filter
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message DiscoverResponse {
+  repeated Feature features = 1;
+  string next_page_token = 2;
+}
+
+message DescribeRequest {
+  string name = 1;
+}
+
+// ---------------------------------------------------------------------------
+// FeatureService — invocation (the contract every feature implements)
+// ---------------------------------------------------------------------------
+
+service FeatureService {
+  // Invoke runs the capability once. The gateway calls this after validating
+  // `input` against the manifest's input_schema.
+  rpc Invoke(InvokeRequest) returns (InvokeResponse);
+
+  // InvokeStream is the streaming form for incremental output (e.g. tokens
+  // from an AI-native feature).
+  rpc InvokeStream(InvokeRequest) returns (stream InvokeChunk);
+}
+
+message InvokeRequest {
+  // Target feature; redundant for direct calls but required at the gateway.
+  string feature = 1;
+
+  // Arguments, shaped by the manifest's input_schema.
+  google.protobuf.Struct input = 2;
+
+  // Carries W3C trace context / deadline / tenant for OTel + multi-tenancy.
+  RequestContext context = 3;
+}
+
+message RequestContext {
+  string trace_id = 1;             // W3C traceparent
+  string tenant = 2;
+  int32 timeout_ms = 3;
+  map<string, string> metadata = 4;
+}
+
+message InvokeResponse {
+  google.protobuf.Struct output = 1;   // shaped by output_schema
+  double latency_ms = 2;
+  Error error = 3;                      // unset on success
+}
+
+message InvokeChunk {
+  oneof payload {
+    google.protobuf.Struct delta = 1;   // incremental output
+    InvokeResponse final = 2;           // terminal frame
+  }
+}
+
+message Error {
+  string code = 1;                 // e.g. INVALID_INPUT, FEATURE_UNAVAILABLE
+  string message = 2;
+}
