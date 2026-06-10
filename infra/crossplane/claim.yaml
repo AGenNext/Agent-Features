@@ -1,0 +1,17 @@
+# What an app/platform team actually creates: one namespaced claim, and
+# Crossplane composes the namespace, gateway, service, and seeded features.
+# The gateway endpoint comes back on the claim's status.
+apiVersion: platform.agentfeatures.io/v1alpha1
+kind: AgentPlatform
+metadata:
+  name: marketplace
+  namespace: default
+spec:
+  parameters:
+    namespace: agent-features
+    gatewayImage: ghcr.io/agennext/agent-features-gateway:latest
+    replicas: 2
+    catalogMode: cluster
+  compositionSelector:
+    matchLabels:
+      provider: kubernetes

@@ -165,6 +165,7 @@ gateway/                                # FastAPI + MCP gateway
   ├── mcp.py         # MCP (JSON-RPC) adapter
   └── samples.py     # dev sample features
 examples/agent_client.py                # discover-then-invoke demo
+infra/crossplane/                       # provision the platform as one Crossplane claim
 tests/test_gateway.py                   # REST + MCP end-to-end tests
 ```
 

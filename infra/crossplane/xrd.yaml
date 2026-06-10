@@ -1,0 +1,60 @@
+# Crossplane packaging for the Agent-Features platform.
+#
+# Defines the platform API surface: a cluster-scoped composite (XAgentPlatform)
+# with a namespaced claim (AgentPlatform) that app teams can create to get a
+# whole marketplace instance — gateway + seeded features — without touching
+# Deployments or CRs directly.
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xagentplatforms.platform.agentfeatures.io
+spec:
+  group: platform.agentfeatures.io
+  names:
+    kind: XAgentPlatform
+    plural: xagentplatforms
+  claimNames:
+    kind: AgentPlatform
+    plural: agentplatforms
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    namespace:
+                      type: string
+                      default: agent-features
+                      description: Namespace the platform is installed into.
+                    gatewayImage:
+                      type: string
+                      default: ghcr.io/agennext/agent-features-gateway:latest
+                      description: Gateway container image.
+                    replicas:
+                      type: integer
+                      default: 2
+                      minimum: 1
+                      description: Gateway replica count.
+                    catalogMode:
+                      type: string
+                      enum: [dev, cluster]
+                      default: cluster
+                      description: >-
+                        dev serves the in-process sample catalog; cluster reads
+                        Feature CRs (features.agentfeatures.io) via the operator.
+                  required: [namespace]
+              required: [parameters]
+            status:
+              type: object
+              properties:
+                gatewayEndpoint:
+                  type: string
+                  description: Cluster-internal endpoint of the gateway service.

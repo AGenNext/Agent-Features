@@ -1,0 +1,146 @@
+# How an XAgentPlatform is realized: a pipeline-mode Composition that renders
+# the namespace, the gateway Deployment/Service, and (optionally) the seeded
+# echo Feature CR — each wrapped in a provider-kubernetes Object so Crossplane
+# can manage arbitrary cluster resources, including our own CRD.
+#
+# Requires: crossplane >= 1.14, provider-kubernetes, function-patch-and-transform.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: agentplatform-kubernetes
+  labels:
+    provider: kubernetes
+spec:
+  compositeTypeRef:
+    apiVersion: platform.agentfeatures.io/v1alpha1
+    kind: XAgentPlatform
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: namespace
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Namespace
+                    metadata:
+                      name: agent-features
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.namespace
+                toFieldPath: spec.forProvider.manifest.metadata.name
+
+          - name: gateway-deployment
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: gateway
+                      namespace: agent-features
+                      labels: {app: agent-features-gateway}
+                    spec:
+                      replicas: 2
+                      selector:
+                        matchLabels: {app: agent-features-gateway}
+                      template:
+                        metadata:
+                          labels: {app: agent-features-gateway}
+                        spec:
+                          containers:
+                            - name: gateway
+                              image: ghcr.io/agennext/agent-features-gateway:latest
+                              ports: [{containerPort: 8000}]
+                              env:
+                                - name: CATALOG_MODE
+                                  value: cluster
+                              readinessProbe:
+                                httpGet: {path: /healthz, port: 8000}
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.namespace
+                toFieldPath: spec.forProvider.manifest.metadata.namespace
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.replicas
+                toFieldPath: spec.forProvider.manifest.spec.replicas
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.gatewayImage
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].image
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.catalogMode
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].env[0].value
+
+          - name: gateway-service
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Service
+                    metadata:
+                      name: gateway
+                      namespace: agent-features
+                    spec:
+                      selector: {app: agent-features-gateway}
+                      ports: [{port: 80, targetPort: 8000}]
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.namespace
+                toFieldPath: spec.forProvider.manifest.metadata.namespace
+              # Surface the in-cluster endpoint on the composite status.
+              - type: ToCompositeFieldPath
+                fromFieldPath: spec.forProvider.manifest.metadata.namespace
+                toFieldPath: status.gatewayEndpoint
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "http://gateway.%s.svc.cluster.local"
+
+          # The marketplace eats its own dog food: seeding a capability is just
+          # another composed resource — a Feature CR our operator reconciles.
+          - name: echo-feature
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: agentfeatures.io/v1alpha1
+                    kind: Feature
+                    metadata:
+                      name: echo
+                      namespace: agent-features
+                    spec:
+                      description: "Echoes its input back — the reference feature."
+                      image: ghcr.io/agennext/feature-echo:0.1.0
+                      protocol: grpc
+                      port: 9090
+                      tags: [example, utility]
+                      visibility: Public
+                      inputSchema: |
+                        {"type":"object","properties":{"message":{"type":"string"}},"required":["message"]}
+                      outputSchema: |
+                        {"type":"object","properties":{"echo":{"type":"string"}}}
+                      runtime:
+                        minReplicas: 1
+                        maxReplicas: 5
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.namespace
+                toFieldPath: spec.forProvider.manifest.metadata.namespace
