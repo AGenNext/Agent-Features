@@ -1,0 +1,17 @@
+# An agent declared in the agent.next DSL. Compile it with POST /agents/compile
+# (or the dashboard's "Agent DSL" panel) to get a runnable composite plus client
+# stubs in JavaScript, TypeScript, Go, Rust, Java, and Protobuf.
+
+agent greet-report
+description "Greet someone, then report stats on the greeting."
+
+input name: string
+
+# Each step invokes a marketplace capability; map inputs with refs like
+# `input.<field>` or `<step>.<field>`. Pin a vendor with `capability@vendor`.
+step greeting = greet(name: input.name)
+step stats = text_stats(text: greeting.greeting)
+
+output greeting = greeting.greeting
+output characters = stats.characters
+output words = stats.words

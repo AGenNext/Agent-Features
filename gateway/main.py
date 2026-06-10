@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, mcp, signing
+from . import __version__, agentdsl, mcp, signing
 from .catalog import Catalog, feature_id, match_version
 from .composer import Composer, Composite, CompositeResult, CompositeSummary
 from .composites import build_dev_composites
@@ -293,6 +293,26 @@ def create_app(catalog: Catalog | None = None, invoker: Invoker | None = None) -
         # from marketplace capabilities, the way a compose file references images.
         composites[spec.name] = spec
         return _composite_summary(spec)
+
+    @app.post("/agents/compile")
+    async def compile_agent(request: Request) -> dict[str, Any]:
+        # Compile an *.agent.next DSL document into a composite plus client
+        # stubs (js/ts/go/rust/java/proto). Optionally publish it as a composite.
+        body = await request.json()
+        source = str(body.get("source", ""))
+        composite, errors = agentdsl.parse(source)
+        if composite is None:
+            return {"ok": False, "errors": errors, "agent": None, "composite": None, "code": {}}
+        if bool(body.get("publish")):
+            composites[composite.name] = composite
+        return {
+            "ok": True,
+            "errors": [],
+            "published": bool(body.get("publish")),
+            "agent": _composite_summary(composite).model_dump(),
+            "composite": composite.model_dump(),
+            "code": {lang: agentdsl.codegen(composite, lang) for lang in agentdsl.LANGUAGES},
+        }
 
     @app.post("/composites/{name}/invoke", response_model=CompositeResult)
     async def invoke_composite(name: str, body: InvokeRequest) -> CompositeResult:
